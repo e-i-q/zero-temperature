@@ -1,4 +1,20 @@
 :root {
+  /* Dark theme (default) */
+  --paper: #1B1917;
+  --paper-raised: #242220;
+  --ink: #EDE8DE;
+  --ink-soft: #A39C8E;
+  --line: #3A372F;
+  --line-strong: #57524A;
+  --temp: #E2784D;
+  --temp-soft: #4A3326;
+  --humidity: #6FA0C9;
+  --humidity-soft: #1F3548;
+  --serif: 'Source Serif 4', Georgia, serif;
+  --mono: 'IBM Plex Mono', 'SF Mono', Consolas, monospace;
+}
+
+:root[data-theme="light"] {
   --paper: #F7F3EC;
   --paper-raised: #FBF9F4;
   --ink: #1C1A17;
@@ -9,8 +25,6 @@
   --temp-soft: #E8C3B5;
   --humidity: #3A5A78;
   --humidity-soft: #C6D4DF;
-  --serif: 'Source Serif 4', Georgia, serif;
-  --mono: 'IBM Plex Mono', 'SF Mono', Consolas, monospace;
 }
 
 * { box-sizing: border-box; }
@@ -22,6 +36,7 @@ body {
   font-family: var(--mono);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 .page {
@@ -63,12 +78,67 @@ h1 {
   letter-spacing: -0.01em;
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
 .status {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 12px;
   color: var(--ink-soft);
+}
+
+/* -- Theme toggle ----------------------------------------- */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.theme-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.theme-toggle-track {
+  display: inline-block;
+  width: 34px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--line-strong);
+  border: 1px solid var(--line-strong);
+  position: relative;
+  transition: background-color 0.2s ease;
+}
+
+.theme-toggle-thumb {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--paper);
+  transition: transform 0.2s ease;
+}
+
+.theme-toggle input:checked + .theme-toggle-track {
+  background: var(--ink-soft);
+}
+
+.theme-toggle input:checked + .theme-toggle-track .theme-toggle-thumb {
+  transform: translateX(16px);
+}
+
+.theme-toggle input:focus-visible + .theme-toggle-track {
+  outline: 2px solid var(--ink-soft);
+  outline-offset: 2px;
 }
 
 .pulse-dot {

@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Field Log — DHT22</title>
+<script>
+  if (localStorage.getItem('theme') === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+  }
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -17,9 +22,15 @@
       <span class="eyebrow">Sensor Station · GPIO2</span>
       <h1>Field Log</h1>
     </div>
-    <div class="status">
-      <span class="pulse-dot"></span>
-      <span id="last-updated">Loading…</span>
+    <div class="header-right">
+      <div class="status">
+        <span class="pulse-dot"></span>
+        <span id="last-updated">Loading…</span>
+      </div>
+      <label class="theme-toggle" title="Toggle light/dark theme">
+        <input type="checkbox" id="theme-switch">
+        <span class="theme-toggle-track"><span class="theme-toggle-thumb"></span></span>
+      </label>
     </div>
   </header>
 

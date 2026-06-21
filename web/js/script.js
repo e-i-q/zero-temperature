@@ -8,6 +8,7 @@
   let nextFetchAt = Date.now() + REFRESH_MS;
 
   const el = (id) => document.getElementById(id);
+  const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
   function fmtTime(iso) {
     const d = new Date(iso);
@@ -143,11 +144,18 @@
       return e;
     };
 
+    // Colors are read from CSS variables (not hardcoded) so the chart
+    // repaints correctly when the light/dark theme is switched.
+    const lineColor = cssVar('--line');
+    const lineStrongColor = cssVar('--line-strong');
+    const tempColor = cssVar('--temp');
+    const humidityColor = cssVar('--humidity');
+
     // Horizontal gridlines - one thin, slightly transparent line per degree C
     for (let v = Math.ceil(tempMin); v <= Math.floor(tempMax); v++) {
       svg.appendChild(makeEl('line', {
         x1: marginLeft, x2: W - marginRight, y1: yTemp(v), y2: yTemp(v),
-        stroke: '#B7AF9D', 'stroke-width': 0.5, 'stroke-opacity': 0.35
+        stroke: lineStrongColor, 'stroke-width': 0.5, 'stroke-opacity': 0.35
       }));
     }
 
@@ -171,7 +179,7 @@
       const xPos = x(tick.getTime());
       svg.appendChild(makeEl('line', {
         x1: xPos, x2: xPos, y1: marginTop, y2: H - marginBottom,
-        stroke: '#D8D2C4', 'stroke-width': 1
+        stroke: lineColor, 'stroke-width': 1
       }));
       const label = stepHours >= 24
         ? tick.toLocaleString(undefined, { month: 'short', day: 'numeric' })
@@ -183,7 +191,7 @@
 
     // Y-axis labels - temperature (right, one per whole degree alongside its gridlines)
     for (let v = Math.ceil(tempMin); v <= Math.floor(tempMax); v++) {
-      const t = makeEl('text', { x: W - marginRight + 8, y: yTemp(v) + 4, 'text-anchor': 'start', 'font-size': '10', fill: '#C1502E' });
+      const t = makeEl('text', { x: W - marginRight + 8, y: yTemp(v) + 4, 'text-anchor': 'start', 'font-size': '10', fill: tempColor });
       t.textContent = v.toFixed(0) + '°';
       svg.appendChild(t);
     }
@@ -192,7 +200,7 @@
     for (let i = 0; i <= 4; i++) {
       const v = humMin + ((humMax - humMin) / 4) * (4 - i);
       const y = marginTop + (plotH / 4) * i;
-      const t = makeEl('text', { x: marginLeft - 8, y: y + 4, 'text-anchor': 'end', 'font-size': '10', fill: '#3A5A78' });
+      const t = makeEl('text', { x: marginLeft - 8, y: y + 4, 'text-anchor': 'end', 'font-size': '10', fill: humidityColor });
       t.textContent = v.toFixed(0) + '%';
       svg.appendChild(t);
     }
@@ -201,13 +209,13 @@
     const tempPath = data.map((r, i) => (i === 0 ? 'M' : 'L') + x(times[i]).toFixed(1) + ',' + yTemp(r.temperature_c).toFixed(1)).join(' ');
     const humPath = data.map((r, i) => (i === 0 ? 'M' : 'L') + x(times[i]).toFixed(1) + ',' + yHum(r.humidity_pct).toFixed(1)).join(' ');
 
-    svg.appendChild(makeEl('path', { d: humPath, fill: 'none', stroke: '#3A5A78', 'stroke-width': 1.5, 'stroke-opacity': 0.85 }));
-    svg.appendChild(makeEl('path', { d: tempPath, fill: 'none', stroke: '#C1502E', 'stroke-width': 1.75 }));
+    svg.appendChild(makeEl('path', { d: humPath, fill: 'none', stroke: humidityColor, 'stroke-width': 1.5, 'stroke-opacity': 0.85 }));
+    svg.appendChild(makeEl('path', { d: tempPath, fill: 'none', stroke: tempColor, 'stroke-width': 1.75 }));
 
     // Latest point markers
     const lastIdx = data.length - 1;
-    svg.appendChild(makeEl('circle', { cx: x(times[lastIdx]), cy: yTemp(temps[lastIdx]), r: 3, fill: '#C1502E' }));
-    svg.appendChild(makeEl('circle', { cx: x(times[lastIdx]), cy: yHum(hums[lastIdx]), r: 3, fill: '#3A5A78' }));
+    svg.appendChild(makeEl('circle', { cx: x(times[lastIdx]), cy: yTemp(temps[lastIdx]), r: 3, fill: tempColor }));
+    svg.appendChild(makeEl('circle', { cx: x(times[lastIdx]), cy: yHum(hums[lastIdx]), r: 3, fill: humidityColor }));
   }
 
   // Range button handling - refetches from the server with the new window,
@@ -219,6 +227,21 @@
     btn.classList.add('active');
     currentRangeHours = parseInt(btn.dataset.hours, 10);
     loadData();
+  });
+
+  // Theme toggle - persists the choice and repaints the chart so its
+  // CSS-variable-derived colors match the newly selected theme.
+  const themeSwitch = el('theme-switch');
+  themeSwitch.checked = document.documentElement.getAttribute('data-theme') === 'light';
+  themeSwitch.addEventListener('change', () => {
+    const theme = themeSwitch.checked ? 'light' : 'dark';
+    if (theme === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+    localStorage.setItem('theme', theme);
+    if (allReadings.length) drawChart();
   });
 
   loadData();
