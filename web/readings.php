@@ -21,7 +21,7 @@ const DEFAULT_HOURS = 48;
 const DEFAULT_LIMIT = 2000;
 const MAX_LIMIT = 5000; // dashboard's "ALL" view requests up to 8760h (1yr); LIMIT still caps row count returned
 
-header('Content-Type: application/json');
+header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, no-cache, must-revalidate');
 
 function fail(int $httpCode, string $message): never {
@@ -47,9 +47,10 @@ if (!file_exists(DB_PATH)) {
 }
 
 try {
-    // Open read-only via SQLite's URI syntax. This avoids PHP/PDO ever
-    // attempting to create or checkpoint -wal/-shm sidecar files itself —
-    // it just reads through whatever WAL state already exists.
+    // Open read-only via SQLite's URI syntax — PHP never writes to this
+    // database. The database itself uses DELETE journal mode (not WAL),
+    // so there are no -shm/-wal sidecar files to worry about; a plain
+    // read-only open against the .db file is all that's needed.
     $pdo = new PDO('sqlite:file:' . DB_PATH . '?mode=ro', null, null, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
@@ -59,9 +60,7 @@ try {
     fail(
         500,
         'Could not open database read-only: ' . $e->getMessage() .
-        '. This usually means the web server user cannot access the database directory ' .
-        '(WAL mode needs at least read access to -wal/-shm sidecar files alongside the .db file). ' .
-        'Check directory permissions on ' . dirname(DB_PATH) . '.'
+        '. Check that ' . DB_PATH . ' exists and is readable by the web server user (www-data).'
     );
 }
 

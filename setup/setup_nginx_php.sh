@@ -47,7 +47,7 @@ check_disk_space() {
 }
 
 check_internet() {
-  info "Checking internet connectivity..."
+  info "Checking internet connectivity…"
   ping -c1 -W3 8.8.8.8 &>/dev/null || error "No internet connection detected. Please connect and retry."
   success "Internet OK"
 }
@@ -60,19 +60,19 @@ detect_php_version() {
 
 # -- Installation --------------------------------------------------------------
 update_system() {
-  info "Updating package lists..."
+  info "Updating package lists…"
   apt-get update -qq
   success "Package lists updated"
 }
 
 install_nginx() {
-  info "Installing nginx..."
+  info "Installing nginx…"
   apt-get install -y nginx
   success "nginx installed: $(nginx -v 2>&1)"
 }
 
 install_php() {
-  info "Installing PHP-FPM and required extensions..."
+  info "Installing PHP-FPM and required extensions…"
   apt-get install -y \
     php-fpm \
     php-sqlite3 \
@@ -89,7 +89,7 @@ install_php() {
 }
 
 verify_sqlite_extension() {
-  info "Verifying SQLite3 PHP extension..."
+  info "Verifying SQLite3 PHP extension…"
   if php -m | grep -qi sqlite3 && php -m | grep -qi pdo_sqlite; then
     success "sqlite3 and pdo_sqlite extensions confirmed active"
   else
@@ -98,7 +98,7 @@ verify_sqlite_extension() {
 }
 
 enable_services() {
-  info "Enabling and starting services..."
+  info "Enabling and starting services…"
   systemctl enable nginx
   systemctl enable "${PHP_FPM_SERVICE}"
   systemctl restart "${PHP_FPM_SERVICE}"
@@ -115,7 +115,7 @@ enable_services() {
 
 # -- nginx site config wiring PHP-FPM in ---------------------------------------
 configure_nginx_site() {
-  info "Configuring nginx site '${SITE_NAME}' to hand .php files to PHP-FPM..."
+  info "Configuring nginx site '${SITE_NAME}' to hand .php files to PHP-FPM…"
 
   CONF_PATH="/etc/nginx/sites-available/${SITE_NAME}"
 
@@ -133,6 +133,12 @@ server {
 
     root ${WEB_ROOT};
     index index.php index.html;
+
+    # Explicitly declare UTF-8 so the browser doesn't have to guess or fall
+    # back to a locale-dependent default. This applies to text/html responses
+    # (and other 'charset' MIME types nginx recognizes) for both static files
+    # and PHP responses served from this site.
+    charset utf-8;
 
     location / {
         try_files \$uri \$uri/ =404;
@@ -166,7 +172,7 @@ EOF
 }
 
 test_nginx_config() {
-  info "Testing nginx configuration..."
+  info "Testing nginx configuration…"
   nginx -t || error "nginx config test failed — check the output above"
   systemctl reload nginx
   success "nginx config valid and reloaded"
@@ -174,7 +180,7 @@ test_nginx_config() {
 
 # -- Permissions for web root --------------------------------------------------
 setup_web_root() {
-  info "Setting up web root at ${WEB_ROOT}..."
+  info "Setting up web root at ${WEB_ROOT}…"
   mkdir -p "$WEB_ROOT"
   chown -R "${RUN_USER}:${RUN_USER}" "$WEB_ROOT"
   success "Web root ready: ${WEB_ROOT} (owned by ${RUN_USER})"
@@ -182,7 +188,7 @@ setup_web_root() {
 
 # -- Sanity test: PHP + SQLite info page ---------------------------------------
 write_test_page() {
-  info "Writing a quick PHP+SQLite test page..."
+  info "Writing a quick PHP+SQLite test page…"
   cat > "${WEB_ROOT}/phptest.php" << 'EOF'
 <?php
 header('Content-Type: text/plain');
@@ -205,7 +211,7 @@ EOF
 }
 
 run_smoke_test() {
-  info "Running smoke test against http://127.0.0.1/phptest.php..."
+  info "Running smoke test against http://127.0.0.1/phptest.php…"
   sleep 1
   RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1/phptest.php || echo "000")
 

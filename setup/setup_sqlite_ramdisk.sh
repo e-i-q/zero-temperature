@@ -52,6 +52,13 @@ RUN_USER="${RUN_USER:-eiq}"       # System user that will own/access the DB
 FLUSH_SCRIPT="/usr/local/bin/sqlite_flush_to_sd"
 RESTORE_SCRIPT="/usr/local/bin/sqlite_restore_from_sd"
 
+# Set RESET=1 to wipe the SD card backup (and its .prev rotation copy) before
+# restoring, so a schema change in create_example_table() actually takes
+# effect instead of being silently overwritten by an old backup on every run.
+# Without this, the restore step always wins because it runs before table
+# creation — CREATE TABLE IF NOT EXISTS is a no-op against a restored table.
+RESET="${RESET:-0}"
+
 # =============================================================================
 banner() {
   echo -e "${CYAN}"
@@ -64,6 +71,9 @@ banner() {
   info "SD backup file   : ${BACKUP_FILE}"
   info "Daily flush time : ${CRON_HOUR}:$(printf '%02d' ${CRON_MINUTE})"
   info "DB owner         : ${RUN_USER}"
+  if [[ "$RESET" == "1" ]]; then
+    warn "RESET=1 is set — existing SD backup and RAM database will be WIPED"
+  fi
   echo
 }
 
@@ -144,6 +154,28 @@ setup_backup_dir() {
   chown "${RUN_USER}:${RUN_USER}" "$SD_BACKUP_DIR"
 }
 
+# ── Wipe old SD backup when RESET=1 ───────────────────────────────────────────
+wipe_sd_backup_if_reset() {
+  if [[ "$RESET" != "1" ]]; then
+    return
+  fi
+
+  warn "RESET=1 — wiping SD card backup so a fresh schema/database is created"
+  warn "This deletes ${BACKUP_FILE} and any rotated .prev copy. This is"
+  warn "PERMANENT — any data only stored on the SD backup will be lost."
+
+  rm -f "$BACKUP_FILE" "${BACKUP_FILE}.prev"
+
+  # Also clear the live RAM copy and its WAL/SHM sidecars, in case this is
+  # being re-run against an already-mounted tmpfs with stale data in it.
+  if [[ -f "$DB_RAM_PATH" ]]; then
+    rm -f "$DB_RAM_PATH" "${DB_RAM_PATH}-wal" "${DB_RAM_PATH}-shm"
+    info "Cleared live RAM database at ${DB_RAM_PATH}"
+  fi
+
+  success "SD backup and RAM copy wiped — restore step will create a brand-new database"
+}
+
 # ── Flush script (RAM → SD) ───────────────────────────────────────────────────
 write_flush_script() {
   info "Writing flush script: ${FLUSH_SCRIPT}"
@@ -222,14 +254,16 @@ fi
 chown "\${RUN_USER}:\${RUN_USER}" "\$DB_RAM_PATH"
 chmod 644 "\$DB_RAM_PATH"
 
-# Run pragma setup AS RUN_USER, not root — ensures WAL/SHM sidecar files
-# created on first write are owned correctly, avoiding "readonly database" errors.
-sudo -u "\$RUN_USER" sqlite3 "\$DB_RAM_PATH" "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;" >/dev/null
-
-# Make sure any -wal/-shm sidecar files SQLite just created are also
-# group-readable, so www-data (now in RUN_USER's group) can query the DB.
-chmod 644 "\${DB_RAM_PATH}"-wal 2>/dev/null || true
-chmod 644 "\${DB_RAM_PATH}"-shm 2>/dev/null || true
+# Use DELETE journal mode (SQLite's default), NOT WAL. WAL mode creates
+# -shm/-wal sidecar files that get owned by whichever process opens the DB
+# FIRST — if that's PHP (www-data) and later the logger script (RUN_USER)
+# tries to write, it hits "attempt to write a readonly database" because it
+# can't write the OTHER process's sidecar files, and vice versa. DELETE mode
+# has no persistent sidecar files: each write uses a temporary rollback
+# journal created and removed within the same transaction by whichever
+# process is writing. We only ever have one writer (the logger) and
+# read-only access from PHP, so WAL's concurrency benefit doesn't apply here.
+sudo -u "\$RUN_USER" sqlite3 "\$DB_RAM_PATH" "PRAGMA journal_mode=DELETE; PRAGMA synchronous=NORMAL;" >/dev/null
 
 echo "[\$TS] Restore complete: \$(du -sh "\$DB_RAM_PATH" | awk '{print \$1}')" | tee -a "\$LOG"
 echo "[\$TS] Database ready at \$DB_RAM_PATH" | tee -a "\$LOG"
@@ -439,6 +473,7 @@ main() {
   grant_web_user_access
   setup_tmpfs_mount
   setup_backup_dir
+  wipe_sd_backup_if_reset
 
   write_flush_script
   write_restore_script
