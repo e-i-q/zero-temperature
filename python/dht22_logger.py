@@ -13,10 +13,9 @@ Usage:
     python3 dht22_logger.py --db /mnt/sqlite_ram/sensors.db
 
 Requires:
-    pip3 install Adafruit_DHT --break-system-packages
-    (Note: Adafruit_DHT is deprecated upstream. If installation fails on a
-    newer Raspberry Pi OS, switch to 'adafruit-circuitpython-dht' instead —
-    see the comment block at the bottom of this file for the equivalent code.)
+    pip3 install adafruit-circuitpython-dht --break-system-packages
+    (Adafruit_DHT, the older library, is deprecated/archived upstream —
+    adafruit-circuitpython-dht is the maintained replacement.)
 """
 
 import argparse
@@ -29,19 +28,7 @@ import board
 import adafruit_dht
 dht_device = adafruit_dht.DHT22(board.D2)  # D2 = GPIO2
 
-try:
-    import Adafruit_DHT
-except ImportError:
-    print(
-        "ERROR: Adafruit_DHT is not installed.\n"
-        "Install it with:\n"
-        "    pip3 install Adafruit_DHT --break-system-packages\n",
-        file=sys.stderr,
-    )
-    sys.exit(1)
-
 # ── Configuration ──────────────────────────────────────────────────────────
-SENSOR = Adafruit_DHT.DHT22
 DEFAULT_PIN = 2             # BCM GPIO2 (physical pin 3)
 DEFAULT_SAMPLES = 5         # Number of readings to average
 DEFAULT_MAX_ATTEMPTS = 50   # Number of max iterations before reaching samples count
