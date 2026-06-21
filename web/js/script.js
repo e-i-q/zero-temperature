@@ -7,6 +7,14 @@
 
   const el = (id) => document.getElementById(id);
 
+  function pickNiceStep(range) {
+    const steps = [1, 2, 5, 10, 20, 50];
+    for (const s of steps) {
+      if (range / s <= 6) return s;
+    }
+    return steps[steps.length - 1];
+  }
+
   function fmtTime(iso) {
     const d = new Date(iso);
     return d.toLocaleString(undefined, {
@@ -132,40 +140,57 @@
       return e;
     };
 
-    // Gridlines (horizontal, 4 bands)
-    for (let i = 0; i <= 4; i++) {
-      const y = marginTop + (plotH / 4) * i;
+    // Horizontal gridlines - one thin, slightly transparent line per degree C
+    for (let v = Math.ceil(tempMin); v <= Math.floor(tempMax); v++) {
       svg.appendChild(makeEl('line', {
-        x1: marginLeft, x2: W - marginRight, y1: y, y2: y,
-        stroke: '#D8D2C4', 'stroke-width': 1
+        x1: marginLeft, x2: W - marginRight, y1: yTemp(v), y2: yTemp(v),
+        stroke: '#B7AF9D', 'stroke-width': 0.5, 'stroke-opacity': 0.35
       }));
     }
 
-    // X-axis time labels (start, mid, end)
-    [0, 0.5, 1].forEach(frac => {
-      const t = tMin + (tMax - tMin) * frac;
-      const d = new Date(t);
-      const label = d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-      svg.appendChild(makeEl('text', {
-        x: x(t), y: H - 8, 'text-anchor': frac === 0 ? 'start' : frac === 1 ? 'end' : 'middle',
-        'font-size': '10'
-      })).textContent = label;
-    });
+    // Vertical gridlines + labels at full-hour marks. Pick the densest step
+    // (from a list of "nice" hour intervals) whose ticks still fit the
+    // available width without crowding the labels.
+    const rangeHours = (tMax - tMin) / 3_600_000;
+    const HOUR_STEPS = [1, 2, 3, 4, 6, 8, 12, 24, 48, 72, 168, 336, 720, 1440, 2160, 4320, 8760];
+    const minLabelSpacingPx = 56;
+    const maxTicks = Math.max(2, Math.floor(plotW / minLabelSpacingPx));
+    let stepHours = HOUR_STEPS[HOUR_STEPS.length - 1];
+    for (const step of HOUR_STEPS) {
+      if (rangeHours / step <= maxTicks) { stepHours = step; break; }
+    }
 
-    // Y-axis labels - temp (left)
-    for (let i = 0; i <= 4; i++) {
-      const v = tempMin + ((tempMax - tempMin) / 4) * (4 - i);
-      const y = marginTop + (plotH / 4) * i;
-      const t = makeEl('text', { x: marginLeft - 8, y: y + 4, 'text-anchor': 'end', 'font-size': '10', fill: '#C1502E' });
+    const tick = new Date(tMin);
+    tick.setMinutes(0, 0, 0);
+    if (tick.getTime() < tMin) tick.setHours(tick.getHours() + 1);
+
+    for (; tick.getTime() <= tMax; tick.setHours(tick.getHours() + stepHours)) {
+      const xPos = x(tick.getTime());
+      svg.appendChild(makeEl('line', {
+        x1: xPos, x2: xPos, y1: marginTop, y2: H - marginBottom,
+        stroke: '#D8D2C4', 'stroke-width': 1
+      }));
+      const label = stepHours >= 24
+        ? tick.toLocaleString(undefined, { month: 'short', day: 'numeric' })
+        : tick.toLocaleString(undefined, { hour: '2-digit', minute: '2-digit' });
+      svg.appendChild(makeEl('text', {
+        x: xPos, y: H - 8, 'text-anchor': 'middle', 'font-size': '10'
+      })).textContent = label;
+    }
+
+    // Y-axis labels - temperature (right, alongside its gridlines)
+    const tempLabelStep = pickNiceStep(tempMax - tempMin);
+    for (let v = Math.ceil(tempMin / tempLabelStep) * tempLabelStep; v <= tempMax; v += tempLabelStep) {
+      const t = makeEl('text', { x: W - marginRight + 8, y: yTemp(v) + 4, 'text-anchor': 'start', 'font-size': '10', fill: '#C1502E' });
       t.textContent = v.toFixed(0) + '°';
       svg.appendChild(t);
     }
 
-    // Y-axis labels - humidity (right)
+    // Y-axis labels - humidity (left)
     for (let i = 0; i <= 4; i++) {
       const v = humMin + ((humMax - humMin) / 4) * (4 - i);
       const y = marginTop + (plotH / 4) * i;
-      const t = makeEl('text', { x: W - marginRight + 8, y: y + 4, 'text-anchor': 'start', 'font-size': '10', fill: '#3A5A78' });
+      const t = makeEl('text', { x: marginLeft - 8, y: y + 4, 'text-anchor': 'end', 'font-size': '10', fill: '#3A5A78' });
       t.textContent = v.toFixed(0) + '%';
       svg.appendChild(t);
     }
