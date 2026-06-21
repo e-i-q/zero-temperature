@@ -4,21 +4,15 @@
 
   let allReadings = [];
   let currentRangeHours = 24;
+  let statusLabel = 'Loading…';
+  let nextFetchAt = Date.now() + REFRESH_MS;
 
   const el = (id) => document.getElementById(id);
-
-  function pickNiceStep(range) {
-    const steps = [1, 2, 5, 10, 20, 50];
-    for (const s of steps) {
-      if (range / s <= 6) return s;
-    }
-    return steps[steps.length - 1];
-  }
 
   function fmtTime(iso) {
     const d = new Date(iso);
     return d.toLocaleString(undefined, {
-      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false
     });
   }
 
@@ -33,6 +27,7 @@
   }
 
   async function loadData() {
+    nextFetchAt = Date.now() + REFRESH_MS;
     try {
       // ALL maps to a generously large window; PHP endpoint clamps to a sane max server-side.
       const requestHours = currentRangeHours >= 999999 ? 8760 : currentRangeHours;
@@ -43,9 +38,15 @@
       allReadings = payload.readings || [];
       render(payload);
     } catch (err) {
-      el('last-updated').textContent = 'Unable to load data';
+      statusLabel = 'Unable to load data';
+      renderCountdown();
       console.error('Failed to load readings:', err);
     }
+  }
+
+  function renderCountdown() {
+    const secsLeft = Math.max(0, Math.round((nextFetchAt - Date.now()) / 1000));
+    el('last-updated').textContent = `${statusLabel} · next refresh in ${secsLeft}s`;
   }
 
   function render(payload) {
@@ -61,7 +62,8 @@
       chartFrame.style.display = 'none';
       legend.style.display = 'none';
       el('log-table').style.display = 'none';
-      el('last-updated').textContent = 'No data';
+      statusLabel = 'No data';
+      renderCountdown();
       return;
     }
 
@@ -76,7 +78,8 @@
     el('current-humidity').innerHTML = latest.humidity_pct.toFixed(1) + '<span class="hero-unit">%</span>';
     el('temp-meta').textContent = fmtTime(latest.recorded_at) + ' — ' + fmtRelative(latest.recorded_at);
     el('humidity-meta').textContent = latest.sample_count + ' sample' + (latest.sample_count === 1 ? '' : 's') + ' averaged';
-    el('last-updated').textContent = 'Updated ' + fmtRelative(latest.recorded_at);
+    statusLabel = 'Updated ' + fmtRelative(latest.recorded_at);
+    renderCountdown();
 
     el('footer-count').textContent = payload.count + ' readings in window';
     el('footer-generated').textContent = 'Exported ' + fmtTime(payload.generated_at);
@@ -172,15 +175,14 @@
       }));
       const label = stepHours >= 24
         ? tick.toLocaleString(undefined, { month: 'short', day: 'numeric' })
-        : tick.toLocaleString(undefined, { hour: '2-digit', minute: '2-digit' });
+        : tick.toLocaleString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
       svg.appendChild(makeEl('text', {
         x: xPos, y: H - 8, 'text-anchor': 'middle', 'font-size': '10'
       })).textContent = label;
     }
 
-    // Y-axis labels - temperature (right, alongside its gridlines)
-    const tempLabelStep = pickNiceStep(tempMax - tempMin);
-    for (let v = Math.ceil(tempMin / tempLabelStep) * tempLabelStep; v <= tempMax; v += tempLabelStep) {
+    // Y-axis labels - temperature (right, one per whole degree alongside its gridlines)
+    for (let v = Math.ceil(tempMin); v <= Math.floor(tempMax); v++) {
       const t = makeEl('text', { x: W - marginRight + 8, y: yTemp(v) + 4, 'text-anchor': 'start', 'font-size': '10', fill: '#C1502E' });
       t.textContent = v.toFixed(0) + '°';
       svg.appendChild(t);
@@ -221,4 +223,5 @@
 
   loadData();
   setInterval(loadData, REFRESH_MS);
+  setInterval(renderCountdown, 1000);
 })();

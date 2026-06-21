@@ -1,6 +1,6 @@
 <?php
 /**
- * readings.php — Live SQLite ? JSON endpoint for the DHT22 dashboard.
+ * readings.php ï¿½ Live SQLite ? JSON endpoint for the DHT22 dashboard.
  *
  * Replaces the cron + export_readings_json.py approach: this queries the
  * SQLite database directly on every request, so the dashboard always shows
@@ -43,11 +43,11 @@ if ($limit < 1 || $limit > MAX_LIMIT) {
 
 // -- Connect --------------------------------------------------------------
 if (!file_exists(DB_PATH)) {
-    fail(503, 'Database not found at ' . DB_PATH . ' — has the logger run yet?');
+    fail(503, 'Database not found at ' . DB_PATH . ' ï¿½ has the logger run yet?');
 }
 
 try {
-    // Open read-only via SQLite's URI syntax — PHP never writes to this
+    // Open read-only via SQLite's URI syntax ï¿½ PHP never writes to this
     // database. The database itself uses DELETE journal mode (not WAL),
     // so there are no -shm/-wal sidecar files to worry about; a plain
     // read-only open against the .db file is all that's needed.
@@ -69,7 +69,7 @@ try {
     $stmt = $pdo->prepare(
         "SELECT recorded_at, sensor, temperature_c, humidity_pct, sample_count
          FROM readings
-         WHERE recorded_at >= datetime('now', :window)
+         WHERE datetime(recorded_at) >= datetime('now', :window)
          ORDER BY recorded_at ASC
          LIMIT :limit"
     );
@@ -81,7 +81,7 @@ try {
     fail(500, 'Query failed: ' . $e->getMessage());
 }
 
-// Cast numeric fields — SQLite via PDO can return strings for some types
+// Cast numeric fields ï¿½ SQLite via PDO can return strings for some types
 foreach ($readings as &$row) {
     $row['temperature_c'] = round((float) $row['temperature_c'], 2);
     $row['humidity_pct']  = round((float) $row['humidity_pct'], 2);
