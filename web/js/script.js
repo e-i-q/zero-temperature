@@ -116,11 +116,11 @@
     svg.innerHTML = '';
 
     if (data.length < 2) {
-      svg.innerHTML = '<text x="440" y="160" text-anchor="middle" font-size="13">Not enough data points yet</text>';
+      svg.innerHTML = '<text x="520" y="200" text-anchor="middle" font-size="13">Not enough data points yet</text>';
       return;
     }
 
-    const W = 880, H = 320;
+    const W = 1040, H = 400;
     const marginLeft = 44, marginRight = 44, marginTop = 16, marginBottom = 32;
     const plotW = W - marginLeft - marginRight;
     const plotH = H - marginTop - marginBottom;
@@ -161,15 +161,16 @@
       }));
     }
 
-    // Vertical gridlines + labels at full-hour marks. Pick the densest step
-    // (from a list of "nice" hour intervals) whose ticks still fit the
-    // available width without crowding the labels.
+    // Vertical gridlines + labels at full-hour marks. Below a day, labels
+    // are just "HH" (no minutes - readings always land on the hour), so
+    // ticks pack much tighter than full date labels; pick the densest step
+    // that still fits without crowding for whichever label format applies.
     const rangeHours = (tMax - tMin) / 3_600_000;
     const HOUR_STEPS = [1, 2, 3, 4, 6, 8, 12, 24, 48, 72, 168, 336, 720, 1440, 2160, 4320, 8760];
-    const minLabelSpacingPx = 56;
-    const maxTicks = Math.max(2, Math.floor(plotW / minLabelSpacingPx));
     let stepHours = HOUR_STEPS[HOUR_STEPS.length - 1];
     for (const step of HOUR_STEPS) {
+      const labelWidthPx = step >= 24 ? 54 : 14;
+      const maxTicks = Math.max(2, Math.floor(plotW / labelWidthPx));
       if (rangeHours / step <= maxTicks) { stepHours = step; break; }
     }
 
@@ -179,16 +180,22 @@
 
     for (; tick.getTime() <= tMax; tick.setHours(tick.getHours() + stepHours)) {
       const xPos = x(tick.getTime());
+      // Quarter-day marks (00/06/12/18) stay near full strength; the rest
+      // fade back so an hourly grid doesn't turn into visual noise.
+      const isQuarterMark = stepHours < 24 && tick.getHours() % 6 === 0;
       svg.appendChild(makeEl('line', {
         x1: xPos, x2: xPos, y1: marginTop, y2: H - marginBottom,
-        stroke: lineColor, 'stroke-width': 1
+        stroke: isQuarterMark ? lineStrongColor : lineColor,
+        'stroke-width': 1,
+        'stroke-opacity': isQuarterMark ? 0.85 : 0.35
       }));
-      const label = stepHours >= 24
+      const isMidnight = tick.getHours() === 0;
+      const label = (stepHours >= 24 || isMidnight)
         ? tick.toLocaleString(undefined, { month: 'short', day: 'numeric' })
-        : tick.toLocaleString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
-      svg.appendChild(makeEl('text', {
-        x: xPos, y: H - 8, 'text-anchor': 'middle', 'font-size': '10'
-      })).textContent = label;
+        : String(tick.getHours()).padStart(2, '0');
+      const textAttrs = { x: xPos, y: H - 8, 'text-anchor': 'middle', 'font-size': '10' };
+      if (isMidnight) textAttrs.transform = `rotate(-45 ${xPos} ${H - 8})`;
+      svg.appendChild(makeEl('text', textAttrs)).textContent = label;
     }
 
     // Sunrise/sunset markers - dashed verticals from the Open-Meteo data
