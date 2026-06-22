@@ -90,7 +90,7 @@
 
     drawChart();
     drawTable();
-    updateTempTrend();
+    updateTempTrend(latest.temperature_c);
     updateStats();
   }
 
@@ -126,13 +126,59 @@
     return { direction, diff };
   }
 
-  function updateTempTrend() {
+  // Favicon recolors itself at the extremes so the browser tab gives an
+  // at-a-glance read without the dashboard needing to be open.
+  const FAVICON_HOT_THRESHOLD_C = 25;
+  const FAVICON_COLD_THRESHOLD_C = 20;
+  const FAVICON_HOT_COLOR = '#e54848';
+  const FAVICON_COLD_COLOR = '#4c8df6';
+  const faviconTintCache = new Map();
+
+  function tempIconColor(tempC) {
+    if (typeof tempC !== 'number') return null;
+    if (tempC > FAVICON_HOT_THRESHOLD_C) return FAVICON_HOT_COLOR;
+    if (tempC < FAVICON_COLD_THRESHOLD_C) return FAVICON_COLD_COLOR;
+    return null; // within the normal range - keep the icon's original color
+  }
+
+  // Recolors a favicon PNG via canvas ('source-in' keeps the icon's alpha
+  // shape, replacing only its visible pixels with the given color) since
+  // PNGs can't be recolored with CSS the way an inline SVG could.
+  function setFaviconTinted(src, color) {
+    const cacheKey = src + '|' + color;
+    const cached = faviconTintCache.get(cacheKey);
+    if (cached) {
+      el('favicon').setAttribute('href', cached);
+      return;
+    }
+    if (!color) {
+      el('favicon').setAttribute('href', src);
+      return;
+    }
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      ctx.globalCompositeOperation = 'source-in';
+      ctx.fillStyle = color;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL('image/png');
+      faviconTintCache.set(cacheKey, dataUrl);
+      el('favicon').setAttribute('href', dataUrl);
+    };
+    img.src = src;
+  }
+
+  function updateTempTrend(currentTemp) {
     const trend = getTempTrend();
     const icons = { up: 'thermometer-up-48.png', down: 'thermometer-down-48.png', flat: 'thermometer-48.png' };
     const arrows = { up: '▲', down: '▼', flat: '▬' };
     const direction = trend ? trend.direction : 'flat';
 
-    el('favicon').setAttribute('href', 'icon/' + icons[direction]);
+    setFaviconTinted('icon/' + icons[direction], tempIconColor(currentTemp));
 
     const badge = el('temp-trend');
     badge.classList.remove('trend-up', 'trend-down', 'trend-flat');
