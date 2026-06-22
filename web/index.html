@@ -46,6 +46,19 @@
       <div class="hero-value humidity" id="current-humidity">—<span class="hero-unit">%</span></div>
       <span class="hero-meta" id="humidity-meta">Awaiting reading</span>
     </div>
+    <div class="hero-cell stats-cell">
+      <span class="hero-label">Range Stats</span>
+      <table id="stats-table">
+        <thead>
+          <tr><th></th><th>Temp °C</th><th>Hum %</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Max</td><td class="temp-cell" id="stat-temp-max">—</td><td class="humidity-cell" id="stat-hum-max">—</td></tr>
+          <tr><td>Min</td><td class="temp-cell" id="stat-temp-min">—</td><td class="humidity-cell" id="stat-hum-min">—</td></tr>
+          <tr><td>Avg</td><td class="temp-cell" id="stat-temp-avg">—</td><td class="humidity-cell" id="stat-hum-avg">—</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 
   <div class="section-label">

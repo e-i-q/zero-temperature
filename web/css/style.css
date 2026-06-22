@@ -163,7 +163,7 @@ h1 {
 /* -- Hero reading ---------------------------------------- */
 .hero {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 1px;
   background: var(--line);
   border: 1px solid var(--line);
@@ -262,6 +262,40 @@ h1 {
   padding: 20px 16px 8px;
   margin-bottom: 16px;
 }
+
+.stats-cell { justify-content: center; }
+
+#stats-table {
+  width: 100%;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+#stats-table thead th {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  font-weight: 500;
+  padding: 4px 4px 8px;
+  text-align: right;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+#stats-table thead th:first-child { text-align: left; }
+
+#stats-table tbody td {
+  padding: 6px 4px;
+  text-align: right;
+  border-bottom: 1px solid var(--line);
+}
+
+#stats-table tbody td:first-child {
+  text-align: left;
+  color: var(--ink-soft);
+}
+
+#stats-table tbody tr:last-child td { border-bottom: none; }
 
 .legend {
   display: flex;

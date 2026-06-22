@@ -91,6 +91,22 @@
     drawChart();
     drawTable();
     updateTempTrend();
+    updateStats();
+  }
+
+  function updateStats() {
+    const data = filteredReadings();
+    if (!data.length) return;
+    const temps = data.map(r => r.temperature_c);
+    const hums = data.map(r => r.humidity_pct);
+    const avg = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
+
+    el('stat-temp-max').textContent = Math.max(...temps).toFixed(1);
+    el('stat-temp-min').textContent = Math.min(...temps).toFixed(1);
+    el('stat-temp-avg').textContent = avg(temps).toFixed(1);
+    el('stat-hum-max').textContent = Math.max(...hums).toFixed(1);
+    el('stat-hum-min').textContent = Math.min(...hums).toFixed(1);
+    el('stat-hum-avg').textContent = avg(hums).toFixed(1);
   }
 
   // Compares the last few readings to gauge whether temperature is trending
