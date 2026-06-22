@@ -13,6 +13,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
+<link rel="icon" id="favicon" href="icon/thermometer-48.png">
 </head>
 <body>
 <div class="page">
@@ -37,7 +38,7 @@
   <div class="hero" id="hero">
     <div class="hero-cell">
       <span class="hero-label">Temperature</span>
-      <div class="hero-value temp" id="current-temp">—<span class="hero-unit">°C</span></div>
+      <div class="hero-value temp" id="current-temp">—<span class="hero-unit">°C</span><span class="trend-badge" id="temp-trend"></span></div>
       <span class="hero-meta" id="temp-meta">Awaiting reading</span>
     </div>
     <div class="hero-cell">

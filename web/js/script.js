@@ -77,7 +77,8 @@
     el('log-table').style.display = 'table';
 
     const latest = payload.latest || allReadings[allReadings.length - 1];
-    el('current-temp').innerHTML = latest.temperature_c.toFixed(1) + '<span class="hero-unit">°C</span>';
+    document.title = latest.temperature_c.toFixed(1) + '°C · Zero Temperature';
+    el('current-temp').innerHTML = latest.temperature_c.toFixed(1) + '<span class="hero-unit">°C</span><span class="trend-badge" id="temp-trend"></span>';
     el('current-humidity').innerHTML = latest.humidity_pct.toFixed(1) + '<span class="hero-unit">%</span>';
     el('temp-meta').textContent = fmtTime(latest.recorded_at) + ' — ' + fmtRelative(latest.recorded_at);
     el('humidity-meta').textContent = latest.sample_count + ' sample' + (latest.sample_count === 1 ? '' : 's') + ' averaged';
@@ -89,6 +90,38 @@
 
     drawChart();
     drawTable();
+    updateTempTrend();
+  }
+
+  // Compares the last few readings to gauge whether temperature is trending
+  // up, down, or flat. Drives both the favicon and the hero trend badge.
+  const TREND_SAMPLE_COUNT = 5;
+  const TREND_FLAT_THRESHOLD_C = 0.2;
+
+  function getTempTrend() {
+    const data = filteredReadings();
+    const n = Math.min(TREND_SAMPLE_COUNT, data.length);
+    if (n < 2) return null;
+    const recent = data.slice(-n);
+    const diff = recent[recent.length - 1].temperature_c - recent[0].temperature_c;
+    let direction = 'flat';
+    if (diff > TREND_FLAT_THRESHOLD_C) direction = 'up';
+    else if (diff < -TREND_FLAT_THRESHOLD_C) direction = 'down';
+    return { direction, diff };
+  }
+
+  function updateTempTrend() {
+    const trend = getTempTrend();
+    const icons = { up: 'thermometer-up-48.png', down: 'thermometer-down-48.png', flat: 'thermometer-48.png' };
+    const arrows = { up: '▲', down: '▼', flat: '▬' };
+    const direction = trend ? trend.direction : 'flat';
+
+    el('favicon').setAttribute('href', 'icon/' + icons[direction]);
+
+    const badge = el('temp-trend');
+    badge.classList.remove('trend-up', 'trend-down', 'trend-flat');
+    badge.classList.add('trend-' + direction);
+    badge.textContent = trend ? `${arrows[direction]} ${Math.abs(trend.diff).toFixed(1)}°` : '';
   }
 
   function filteredReadings() {
