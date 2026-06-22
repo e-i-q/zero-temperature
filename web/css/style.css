@@ -10,6 +10,7 @@
   --temp-soft: #4A3326;
   --humidity: #6FA0C9;
   --humidity-soft: #1F3548;
+  --sun: #D9A441;
   --serif: 'Source Serif 4', Georgia, serif;
   --mono: 'IBM Plex Mono', 'SF Mono', Consolas, monospace;
 }
@@ -25,6 +26,7 @@
   --temp-soft: #E8C3B5;
   --humidity: #3A5A78;
   --humidity-soft: #C6D4DF;
+  --sun: #B8860B;
 }
 
 * { box-sizing: border-box; }
@@ -271,6 +273,7 @@ h1 {
 }
 .legend-swatch.temp { background: var(--temp); }
 .legend-swatch.humidity { background: var(--humidity); }
+.legend-swatch.sun { background: var(--sun); }
 
 svg text {
   font-family: var(--mono);

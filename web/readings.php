@@ -21,6 +21,15 @@ const DEFAULT_HOURS = 48;
 const DEFAULT_LIMIT = 2000;
 const MAX_LIMIT = 5000; // dashboard's "ALL" view requests up to 8760h (1yr); LIMIT still caps row count returned
 
+// Sunrise/sunset for the chart's day/night markers. Open-Meteo's daily
+// sunrise/sunset variable only covers a rolling forecast+history window
+// (max 92 past + 16 forecast days), which is plenty for the 6H/24H/48H
+// views and covers the recent part of "ALL". Cached for a day since these
+// times barely move from one poll to the next.
+const SUN_LATITUDE = 49.1951;  // Brno
+const SUN_LONGITUDE = 16.6068;
+const SUN_CACHE_TTL = 86400;
+
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, no-cache, must-revalidate');
 
@@ -28,6 +37,61 @@ function fail(int $httpCode, string $message): never {
     http_response_code($httpCode);
     echo json_encode(['error' => $message]);
     exit;
+}
+
+// -- Sunrise/sunset (Open-Meteo, file-cached) ------------------------------
+function sunCachePath(): string {
+    return sys_get_temp_dir() . '/dht22_sun_times_cache.json';
+}
+
+function fetchSunTimesFromApi(): ?array {
+    $url = 'https://api.open-meteo.com/v1/forecast?' . http_build_query([
+        'latitude'      => SUN_LATITUDE,
+        'longitude'     => SUN_LONGITUDE,
+        'daily'         => 'sunrise,sunset',
+        'timezone'      => 'auto',
+        'past_days'     => 92,
+        'forecast_days' => 16,
+    ]);
+
+    // file_get_contents + stream context instead of curl - keeps this free
+    // of the php-curl extension, which setup_nginx_php.sh doesn't install.
+    $context = stream_context_create(['http' => ['timeout' => 5]]);
+    $body = @file_get_contents($url, false, $context);
+    if ($body === false) return null;
+
+    $data = json_decode($body, true);
+    $days = $data['daily']['time'] ?? null;
+    $sunrises = $data['daily']['sunrise'] ?? null;
+    $sunsets = $data['daily']['sunset'] ?? null;
+    if (!$days || !$sunrises || !$sunsets) return null;
+
+    $sunTimes = [];
+    foreach ($days as $i => $date) {
+        $sunTimes[$date] = ['sunrise' => $sunrises[$i] ?? null, 'sunset' => $sunsets[$i] ?? null];
+    }
+    return $sunTimes;
+}
+
+function getSunTimes(): array {
+    $cachePath = sunCachePath();
+    $cacheFresh = is_file($cachePath) && (time() - filemtime($cachePath)) < SUN_CACHE_TTL;
+
+    if (!$cacheFresh) {
+        $fetched = fetchSunTimesFromApi();
+        if ($fetched !== null) {
+            file_put_contents($cachePath, json_encode($fetched));
+            return $fetched;
+        }
+        // API unreachable - fall through to whatever is cached, even if stale,
+        // rather than dropping the markers entirely for this request.
+    }
+
+    if (is_file($cachePath)) {
+        $cached = json_decode((string) file_get_contents($cachePath), true);
+        if (is_array($cached)) return $cached;
+    }
+    return [];
 }
 
 // -- Parse + validate query params ---------------------------------------
@@ -96,6 +160,7 @@ $payload = [
     'count'        => count($readings),
     'latest'       => $latest,
     'readings'     => $readings,
+    'sun_times'    => getSunTimes(),
 ];
 
 echo json_encode($payload, JSON_UNESCAPED_SLASHES);

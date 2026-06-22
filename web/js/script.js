@@ -3,6 +3,7 @@
   const REFRESH_MS = 60000; // poll for new data every minute
 
   let allReadings = [];
+  let sunTimes = {};
   let currentRangeHours = 24;
   let statusLabel = 'Loading…';
   let nextFetchAt = Date.now() + REFRESH_MS;
@@ -37,6 +38,7 @@
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const payload = await res.json();
       allReadings = payload.readings || [];
+      sunTimes = payload.sun_times || {};
       render(payload);
     } catch (err) {
       statusLabel = 'Unable to load data';
@@ -187,6 +189,32 @@
       svg.appendChild(makeEl('text', {
         x: xPos, y: H - 8, 'text-anchor': 'middle', 'font-size': '10'
       })).textContent = label;
+    }
+
+    // Sunrise/sunset markers - dashed verticals from the Open-Meteo data
+    // readings.php caches and merges into the payload as sun_times[date].
+    // Only label them when there are few enough to stay legible (dense
+    // long-range views like "ALL" just get the bare dashed lines).
+    const sunColor = cssVar('--sun');
+    const sunEvents = [];
+    for (const day in sunTimes) {
+      const { sunrise, sunset } = sunTimes[day];
+      if (sunrise) sunEvents.push({ type: 'sunrise', t: new Date(sunrise).getTime() });
+      if (sunset) sunEvents.push({ type: 'sunset', t: new Date(sunset).getTime() });
+    }
+    const visibleSunEvents = sunEvents.filter(e => e.t >= tMin && e.t <= tMax);
+    const showSunLabels = visibleSunEvents.length <= 14;
+    for (const evt of visibleSunEvents) {
+      const xPos = x(evt.t);
+      svg.appendChild(makeEl('line', {
+        x1: xPos, x2: xPos, y1: marginTop, y2: H - marginBottom,
+        stroke: sunColor, 'stroke-width': 1, 'stroke-dasharray': '3,3', 'stroke-opacity': 0.7
+      }));
+      if (showSunLabels) {
+        svg.appendChild(makeEl('text', {
+          x: xPos, y: marginTop + 10, 'text-anchor': 'middle', 'font-size': '10', fill: sunColor
+        })).textContent = evt.type === 'sunrise' ? '☀↑' : '☀↓';
+      }
     }
 
     // Y-axis labels - temperature (right, one per whole degree alongside its gridlines)
