@@ -11,6 +11,7 @@
   --humidity: #6FA0C9;
   --humidity-soft: #1F3548;
   --sun: #D9A441;
+  --wind: #7DB88A;
   --serif: 'Source Serif 4', Georgia, serif;
   --mono: 'IBM Plex Mono', 'SF Mono', Consolas, monospace;
 }
@@ -27,6 +28,7 @@
   --humidity: #3A5A78;
   --humidity-soft: #C6D4DF;
   --sun: #B8860B;
+  --wind: #4C8A5E;
 }
 
 * { box-sizing: border-box; }
@@ -318,6 +320,20 @@ h1 {
 .legend-swatch.temp { background: var(--temp); }
 .legend-swatch.humidity { background: var(--humidity); }
 .legend-swatch.sun { background: var(--sun); }
+.legend-swatch.wind { background: var(--wind); }
+
+.legend-icon {
+  width: 16px;
+  height: 16px;
+  vertical-align: middle;
+}
+
+.weather-note {
+  font-size: 11px;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--ink-soft);
+}
 
 svg text {
   font-family: var(--mono);

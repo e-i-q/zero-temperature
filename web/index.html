@@ -81,6 +81,22 @@
     <div class="legend-item"><span class="legend-swatch sun"></span> Sunrise / Sunset</div>
   </div>
 
+  <div class="section-label">
+    <span>Weather · Brno (Open-Meteo)</span>
+    <span class="weather-note">Historical reading, not a forecast</span>
+  </div>
+
+  <div class="chart-frame">
+    <svg id="chart-weather" viewBox="0 0 1040 400" width="100%" preserveAspectRatio="xMidYMid meet"></svg>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><span class="legend-swatch temp"></span> Temperature (°C)</div>
+    <div class="legend-item"><span class="legend-swatch humidity"></span> Humidity (%)</div>
+    <div class="legend-item"><span class="legend-swatch wind"></span> Wind speed (km/h)</div>
+    <div class="legend-item"><img class="legend-icon" id="weather-cloud-legend-icon" src="icon/cloud-48.png" alt=""> Cloud cover</div>
+  </div>
+
   <div class="section-label">Recent Readings</div>
   <table id="log-table">
     <thead>

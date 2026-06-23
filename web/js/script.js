@@ -1,9 +1,11 @@
 (function () {
   const DATA_URL = 'readings.php';
+  const WEATHER_URL = 'weather.php';
   const REFRESH_MS = 60000; // poll for new data every minute
 
   let allReadings = [];
   let sunTimes = {};
+  let weatherReadings = [];
   let currentRangeHours = 24;
   let statusLabel = 'Loading…';
   let nextFetchAt = Date.now() + REFRESH_MS;
@@ -30,9 +32,18 @@
 
   async function loadData() {
     nextFetchAt = Date.now() + REFRESH_MS;
+    // ALL maps to a generously large window; PHP endpoints clamp to a sane max server-side.
+    const requestHours = currentRangeHours >= 999999 ? 8760 : currentRangeHours;
+    // Fetched independently so a hiccup in one (e.g. Open-Meteo being down)
+    // doesn't take out the other chart.
+    await Promise.all([
+      loadSensorData(requestHours),
+      loadWeatherData(requestHours),
+    ]);
+  }
+
+  async function loadSensorData(requestHours) {
     try {
-      // ALL maps to a generously large window; PHP endpoint clamps to a sane max server-side.
-      const requestHours = currentRangeHours >= 999999 ? 8760 : currentRangeHours;
       const url = `${DATA_URL}?hours=${requestHours}`;
       const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -44,6 +55,19 @@
       statusLabel = 'Unable to load data';
       renderCountdown();
       console.error('Failed to load readings:', err);
+    }
+  }
+
+  async function loadWeatherData(requestHours) {
+    try {
+      const url = `${WEATHER_URL}?hours=${requestHours}`;
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const payload = await res.json();
+      weatherReadings = payload.readings || [];
+      drawWeatherChart();
+    } catch (err) {
+      console.error('Failed to load weather data:', err);
     }
   }
 
@@ -356,6 +380,194 @@
     svg.appendChild(makeEl('circle', { cx: x(times[lastIdx]), cy: yHum(hums[lastIdx]), r: 3, fill: humidityColor }));
   }
 
+  // Picks a glanceable cloud-cover icon for the latest weather reading.
+  // There's no dedicated "cloudy night" icon, so cloudy hours fall back to
+  // the day icon regardless of time - only the clear-sky case branches on it.
+  function pickCloudIcon(cloudPct, night) {
+    if (typeof cloudPct !== 'number') return 'cloud-48.png';
+    if (night && cloudPct < 20) return 'night-48.png';
+    if (cloudPct < 15) return 'sun-48.png';
+    if (cloudPct < 50) return 'partly-cloudy-day-48.png';
+    if (cloudPct < 85) return 'cloud-48.png';
+    return 'clouds-48.png';
+  }
+
+  // Reuses the same sun_times data the sensor chart draws its sunrise/sunset
+  // markers from to decide whether a given instant falls after sunset.
+  function isNightAt(t) {
+    const events = Object.values(sunTimes)
+      .flatMap(({ sunrise, sunset }) => [
+        sunrise ? { type: 'sunrise', t: new Date(sunrise).getTime() } : null,
+        sunset ? { type: 'sunset', t: new Date(sunset).getTime() } : null,
+      ])
+      .filter(Boolean)
+      .sort((a, b) => a.t - b.t);
+    let night = false;
+    for (const evt of events) {
+      if (evt.t > t) break;
+      night = evt.type === 'sunset';
+    }
+    return night;
+  }
+
+  // Second timeline graph: same look and scaling approach as drawChart(),
+  // but plots Open-Meteo data for Brno (temperature/humidity/wind) instead
+  // of the DHT22 sensor, for visual comparison. Clouds aren't plotted as a
+  // line - just a single icon for the latest reading, per the brief.
+  function drawWeatherChart() {
+    const data = weatherReadings;
+    const svg = el('chart-weather');
+    svg.innerHTML = '';
+
+    if (data.length < 2) {
+      svg.innerHTML = '<text x="520" y="200" text-anchor="middle" font-size="13">Not enough weather data yet</text>';
+      return;
+    }
+
+    const W = 1040, H = 400;
+    // Extra top margin makes room for the cloud icon; extra right margin
+    // makes room for a second (wind) tick-label column next to temperature's.
+    const marginLeft = 44, marginRight = 64, marginTop = 40, marginBottom = 32;
+    const plotW = W - marginLeft - marginRight;
+    const plotH = H - marginTop - marginBottom;
+
+    const times = data.map(r => new Date(r.recorded_at).getTime());
+    const temps = data.map(r => r.temperature_c);
+    const hums = data.map(r => r.humidity_pct);
+    const winds = data.map(r => r.wind_speed_kmh);
+
+    const tMin = Math.min(...times), tMax = Math.max(...times);
+    const tempMin = Math.floor(Math.min(...temps) - 1);
+    const tempMax = Math.ceil(Math.max(...temps) + 1);
+    const humMin = Math.max(0, Math.floor(Math.min(...hums) - 5));
+    const humMax = Math.min(100, Math.ceil(Math.max(...hums) + 5));
+    const windMin = 0;
+    const windMax = Math.max(5, Math.ceil(Math.max(...winds) + 2));
+
+    const x = (t) => marginLeft + ((t - tMin) / (tMax - tMin || 1)) * plotW;
+    const yTemp = (v) => marginTop + plotH - ((v - tempMin) / (tempMax - tempMin || 1)) * plotH;
+    const yHum = (v) => marginTop + plotH - ((v - humMin) / (humMax - humMin || 1)) * plotH;
+    const yWind = (v) => marginTop + plotH - ((v - windMin) / (windMax - windMin || 1)) * plotH;
+
+    const ns = 'http://www.w3.org/2000/svg';
+    const makeEl = (tag, attrs) => {
+      const e = document.createElementNS(ns, tag);
+      for (const k in attrs) e.setAttribute(k, attrs[k]);
+      return e;
+    };
+
+    const lineColor = cssVar('--line');
+    const lineStrongColor = cssVar('--line-strong');
+    const tempColor = cssVar('--temp');
+    const humidityColor = cssVar('--humidity');
+    const windColor = cssVar('--wind');
+
+    // Horizontal gridlines - one per degree C, same convention as the sensor chart
+    for (let v = Math.ceil(tempMin); v <= Math.floor(tempMax); v++) {
+      svg.appendChild(makeEl('line', {
+        x1: marginLeft, x2: W - marginRight, y1: yTemp(v), y2: yTemp(v),
+        stroke: lineStrongColor, 'stroke-width': 0.5, 'stroke-opacity': 0.35
+      }));
+    }
+
+    // Vertical gridlines + time labels - identical stepping logic to the sensor chart
+    const rangeHours = (tMax - tMin) / 3_600_000;
+    const HOUR_STEPS = [1, 2, 3, 4, 6, 8, 12, 24, 48, 72, 168, 336, 720, 1440, 2160, 4320, 8760];
+    let stepHours = HOUR_STEPS[HOUR_STEPS.length - 1];
+    for (const step of HOUR_STEPS) {
+      const labelWidthPx = step >= 24 ? 54 : 14;
+      const maxTicks = Math.max(2, Math.floor(plotW / labelWidthPx));
+      if (rangeHours / step <= maxTicks) { stepHours = step; break; }
+    }
+
+    const tick = new Date(tMin);
+    tick.setMinutes(0, 0, 0);
+    if (tick.getTime() < tMin) tick.setHours(tick.getHours() + 1);
+
+    for (; tick.getTime() <= tMax; tick.setHours(tick.getHours() + stepHours)) {
+      const xPos = x(tick.getTime());
+      const isQuarterMark = stepHours < 24 && tick.getHours() % 6 === 0;
+      svg.appendChild(makeEl('line', {
+        x1: xPos, x2: xPos, y1: marginTop, y2: H - marginBottom,
+        stroke: isQuarterMark ? lineStrongColor : lineColor,
+        'stroke-width': 1,
+        'stroke-opacity': isQuarterMark ? 0.85 : 0.35
+      }));
+      const isMidnight = tick.getHours() === 0;
+      const label = (stepHours >= 24 || isMidnight)
+        ? tick.toLocaleString(undefined, { month: 'short', day: 'numeric' })
+        : String(tick.getHours()).padStart(2, '0');
+      const textAttrs = { x: xPos, y: H - 8, 'text-anchor': 'middle', 'font-size': '10' };
+      if (isMidnight) textAttrs.transform = `rotate(-45 ${xPos} ${H - 8})`;
+      svg.appendChild(makeEl('text', textAttrs)).textContent = label;
+    }
+
+    // Y-axis labels - temperature (right, inner column)
+    for (let v = Math.ceil(tempMin); v <= Math.floor(tempMax); v++) {
+      const t = makeEl('text', { x: W - marginRight + 8, y: yTemp(v) + 4, 'text-anchor': 'start', 'font-size': '10', fill: tempColor });
+      t.textContent = v.toFixed(0) + '°';
+      svg.appendChild(t);
+    }
+
+    // Y-axis labels - wind speed, km/h (right, outer column - fewer ticks to avoid crowding)
+    for (let i = 0; i <= 4; i++) {
+      const v = windMin + ((windMax - windMin) / 4) * (4 - i);
+      const y = marginTop + (plotH / 4) * i;
+      const t = makeEl('text', { x: W - 6, y: y + 4, 'text-anchor': 'end', 'font-size': '9', fill: windColor });
+      t.textContent = v.toFixed(0);
+      svg.appendChild(t);
+    }
+
+    // Y-axis labels - humidity (left)
+    for (let i = 0; i <= 4; i++) {
+      const v = humMin + ((humMax - humMin) / 4) * (4 - i);
+      const y = marginTop + (plotH / 4) * i;
+      const t = makeEl('text', { x: marginLeft - 8, y: y + 4, 'text-anchor': 'end', 'font-size': '10', fill: humidityColor });
+      t.textContent = v.toFixed(0) + '%';
+      svg.appendChild(t);
+    }
+
+    // Build path strings
+    const tempPath = data.map((r, i) => (i === 0 ? 'M' : 'L') + x(times[i]).toFixed(1) + ',' + yTemp(r.temperature_c).toFixed(1)).join(' ');
+    const humPath = data.map((r, i) => (i === 0 ? 'M' : 'L') + x(times[i]).toFixed(1) + ',' + yHum(r.humidity_pct).toFixed(1)).join(' ');
+    const windPath = data.map((r, i) => (i === 0 ? 'M' : 'L') + x(times[i]).toFixed(1) + ',' + yWind(r.wind_speed_kmh).toFixed(1)).join(' ');
+
+    // Filled area under each line, closed down to the plot baseline
+    const baselineY = H - marginBottom;
+    const tempAreaPath = `${tempPath} L${x(times[data.length - 1]).toFixed(1)},${baselineY} L${x(times[0]).toFixed(1)},${baselineY} Z`;
+    const humAreaPath = `${humPath} L${x(times[data.length - 1]).toFixed(1)},${baselineY} L${x(times[0]).toFixed(1)},${baselineY} Z`;
+
+    svg.appendChild(makeEl('path', { d: humAreaPath, fill: humidityColor, stroke: 'none', 'fill-opacity': 0.08 }));
+    svg.appendChild(makeEl('path', { d: tempAreaPath, fill: tempColor, stroke: 'none', 'fill-opacity': 0.08 }));
+
+    svg.appendChild(makeEl('path', { d: humPath, fill: 'none', stroke: humidityColor, 'stroke-width': 1.5, 'stroke-opacity': 0.85 }));
+    svg.appendChild(makeEl('path', { d: windPath, fill: 'none', stroke: windColor, 'stroke-width': 1.25, 'stroke-opacity': 0.85, 'stroke-dasharray': '4,2' }));
+    svg.appendChild(makeEl('path', { d: tempPath, fill: 'none', stroke: tempColor, 'stroke-width': 1.75 }));
+
+    // Latest point markers
+    const lastIdx = data.length - 1;
+    svg.appendChild(makeEl('circle', { cx: x(times[lastIdx]), cy: yTemp(temps[lastIdx]), r: 3, fill: tempColor }));
+    svg.appendChild(makeEl('circle', { cx: x(times[lastIdx]), cy: yHum(hums[lastIdx]), r: 3, fill: humidityColor }));
+    svg.appendChild(makeEl('circle', { cx: x(times[lastIdx]), cy: yWind(winds[lastIdx]), r: 3, fill: windColor }));
+
+    // Cloud cover - a single icon for the latest reading rather than a
+    // plotted line, per the brief ("preferably just icon in top of the graph").
+    const latestCloud = data[lastIdx].cloud_pct;
+    const night = isNightAt(times[lastIdx]);
+    const iconFile = pickCloudIcon(latestCloud, night);
+    svg.appendChild(makeEl('image', {
+      href: 'icon/' + iconFile, x: W / 2 - 14, y: 2, width: 28, height: 28,
+    }));
+    if (typeof latestCloud === 'number') {
+      svg.appendChild(makeEl('text', {
+        x: W / 2, y: 34, 'text-anchor': 'middle', 'font-size': '10'
+      })).textContent = latestCloud.toFixed(0) + '% clouds';
+    }
+
+    const legendIcon = el('weather-cloud-legend-icon');
+    if (legendIcon) legendIcon.src = 'icon/' + iconFile;
+  }
+
   // Range button handling - refetches from the server with the new window,
   // since the PHP endpoint only returns the requested hours of history.
   document.getElementById('range-buttons').addEventListener('click', (e) => {
@@ -380,6 +592,7 @@
     }
     localStorage.setItem('theme', theme);
     if (allReadings.length) drawChart();
+    if (weatherReadings.length) drawWeatherChart();
   });
 
   loadData();
