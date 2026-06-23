@@ -3,10 +3,12 @@
   const WEATHER_URL = 'weather.php';
   const REFRESH_MS = 60000; // poll for new data every minute
 
+  const RANGE_STORAGE_KEY = 'rangeDelta';
+
   let allReadings = [];
   let sunTimes = {};
   let weatherReadings = [];
-  let currentRangeHours = 24;
+  let currentRangeDelta = '-24 hours';
   let statusLabel = 'Loading…';
   let nextFetchAt = Date.now() + REFRESH_MS;
 
@@ -44,7 +46,7 @@
 
   async function loadSensorData(requestHours) {
     try {
-      const url = `${DATA_URL}?hours=${requestHours}`;
+      const url = `${DATA_URL}?delta=${encodeURIComponent(currentRangeDelta)}`;
       const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const payload = await res.json();
@@ -569,15 +571,28 @@
   }
 
   // Range button handling - refetches from the server with the new window,
-  // since the PHP endpoint only returns the requested hours of history.
+  // since the PHP endpoint only returns the requested window of history.
   document.getElementById('range-buttons').addEventListener('click', (e) => {
     const btn = e.target.closest('.range-btn');
     if (!btn) return;
     document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-    currentRangeHours = parseInt(btn.dataset.hours, 10);
+    currentRangeDelta = btn.dataset.delta;
+    localStorage.setItem(RANGE_STORAGE_KEY, currentRangeDelta);
     loadData();
   });
+
+  // Restore the previously selected range (if any) before the first fetch,
+  // so a page reload keeps showing the same window instead of resetting to 24H.
+  (function restoreRangeSelection() {
+    const stored = localStorage.getItem(RANGE_STORAGE_KEY);
+    const buttons = document.querySelectorAll('.range-btn');
+    const match = stored && [...buttons].find((b) => b.dataset.delta === stored);
+    if (!match) return;
+    buttons.forEach((b) => b.classList.remove('active'));
+    match.classList.add('active');
+    currentRangeDelta = stored;
+  })();
 
   // Theme toggle - persists the choice and repaints the chart so its
   // CSS-variable-derived colors match the newly selected theme.

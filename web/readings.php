@@ -7,8 +7,10 @@
  * current data with no export delay.
  *
  * Query params (all optional):
- *   ?hours=24    How many hours of history to return (default 48)
- *   ?limit=2000  Max rows to return (default 2000)
+ *   ?delta=-24 hours  SQLite datetime() modifier for how far back to query
+ *                     (default -48 hours). Must match DELTA_PATTERN below;
+ *                     anything else falls back to the default.
+ *   ?limit=2000       Max rows to return (default 2000)
  *
  * Configure DB_PATH below to point at your RAM-disk database.
  */
@@ -17,9 +19,10 @@ declare(strict_types=1);
 
 // -- Configuration --------------------------------------------------------
 const DB_PATH = '/mnt/sqlite_ram/sensors.db';
-const DEFAULT_HOURS = 48;
+const DEFAULT_DELTA = '-48 hours';
+const DELTA_PATTERN = '/^-([1-9][0-9]{0,5}) (minutes|hours|days)$/';
 const DEFAULT_LIMIT = 2000;
-const MAX_LIMIT = 5000; // dashboard's "ALL" view requests up to 8760h (1yr); LIMIT still caps row count returned
+const MAX_LIMIT = 5000; // dashboard's "ALL" view requests up to -8760 hours (1yr); LIMIT still caps row count returned
 
 // Sunrise/sunset for the chart's day/night markers. Open-Meteo's daily
 // sunrise/sunset variable only covers a rolling forecast+history window
@@ -95,11 +98,14 @@ function getSunTimes(): array {
 }
 
 // -- Parse + validate query params ---------------------------------------
-$hours = isset($_GET['hours']) ? (int) $_GET['hours'] : DEFAULT_HOURS;
+$delta = isset($_GET['delta']) ? (string) $_GET['delta'] : DEFAULT_DELTA;
 $limit = isset($_GET['limit']) ? (int) $_GET['limit'] : DEFAULT_LIMIT;
 
-if ($hours < 1 || $hours > 8760) {
-    $hours = DEFAULT_HOURS;
+// $delta is bound as a parameter below (never concatenated into SQL), but it
+// still has to be a valid SQLite datetime() modifier - reject anything else
+// rather than letting datetime() silently no-op on a malformed string.
+if (!preg_match(DELTA_PATTERN, $delta)) {
+    $delta = DEFAULT_DELTA;
 }
 if ($limit < 1 || $limit > MAX_LIMIT) {
     $limit = DEFAULT_LIMIT;
@@ -137,7 +143,7 @@ try {
          ORDER BY recorded_at ASC
          LIMIT :limit"
     );
-    $stmt->bindValue(':window', "-{$hours} hours", PDO::PARAM_STR);
+    $stmt->bindValue(':window', $delta, PDO::PARAM_STR);
     $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
     $stmt->execute();
     $readings = $stmt->fetchAll();
