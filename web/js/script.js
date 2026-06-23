@@ -34,17 +34,15 @@
 
   async function loadData() {
     nextFetchAt = Date.now() + REFRESH_MS;
-    // ALL maps to a generously large window; PHP endpoints clamp to a sane max server-side.
-    const requestHours = currentRangeHours >= 999999 ? 8760 : currentRangeHours;
     // Fetched independently so a hiccup in one (e.g. Open-Meteo being down)
     // doesn't take out the other chart.
     await Promise.all([
-      loadSensorData(requestHours),
-      loadWeatherData(requestHours),
+      loadSensorData(),
+      loadWeatherData(),
     ]);
   }
 
-  async function loadSensorData(requestHours) {
+  async function loadSensorData() {
     try {
       const url = `${DATA_URL}?delta=${encodeURIComponent(currentRangeDelta)}`;
       const res = await fetch(url, { cache: 'no-store' });
@@ -60,9 +58,9 @@
     }
   }
 
-  async function loadWeatherData(requestHours) {
+  async function loadWeatherData() {
     try {
-      const url = `${WEATHER_URL}?hours=${requestHours}`;
+      const url = `${WEATHER_URL}?delta=${encodeURIComponent(currentRangeDelta)}`;
       const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const payload = await res.json();
@@ -382,16 +380,18 @@
     svg.appendChild(makeEl('circle', { cx: x(times[lastIdx]), cy: yHum(hums[lastIdx]), r: 3, fill: humidityColor }));
   }
 
-  // Picks a glanceable cloud-cover icon for the latest weather reading.
-  // There's no dedicated "cloudy night" icon, so cloudy hours fall back to
-  // the day icon regardless of time - only the clear-sky case branches on it.
-  function pickCloudIcon(cloudPct, night) {
-    if (typeof cloudPct !== 'number') return 'cloud-48.png';
-    if (night && cloudPct < 20) return 'night-48.png';
-    if (cloudPct < 15) return 'sun-48.png';
-    if (cloudPct < 50) return 'partly-cloudy-day-48.png';
-    if (cloudPct < 85) return 'cloud-48.png';
-    return 'clouds-48.png';
+  // Picks a glanceable weather-condition icon from a WMO weather_code. There's
+  // no dedicated rain/snow icon among the available assets, so any code at or
+  // above 51 (drizzle and up - rain, snow, showers, thunderstorms) borrows
+  // the lightning icon as the closest stand-in; clear sky is the only case
+  // that branches on day/night.
+  function pickWeatherIcon(weatherCode, night) {
+    if (typeof weatherCode !== 'number') return 'cloud-48.png';
+    if (weatherCode === 0) return night ? 'night-48.png' : 'sun-48.png';
+    if (weatherCode === 1 || weatherCode === 2) return 'partly-cloudy-day-48.png';
+    if (weatherCode === 3 || weatherCode === 45 || weatherCode === 48) return 'clouds-48.png';
+    if (weatherCode >= 51) return 'cloud-lightning-48.png';
+    return 'cloud-48.png';
   }
 
   // Reuses the same sun_times data the sensor chart draws its sunrise/sunset
@@ -412,10 +412,23 @@
     return night;
   }
 
+  // Binary search for the data index closest to time t (times is ascending) -
+  // used to look up the weather row nearest each icon's tick time.
+  function nearestIndex(times, t) {
+    let lo = 0, hi = times.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (times[mid] < t) lo = mid + 1; else hi = mid;
+    }
+    if (lo > 0 && Math.abs(times[lo - 1] - t) <= Math.abs(times[lo] - t)) return lo - 1;
+    return lo;
+  }
+
   // Second timeline graph: same look and scaling approach as drawChart(),
   // but plots Open-Meteo data for Brno (temperature/humidity/wind) instead
   // of the DHT22 sensor, for visual comparison. Clouds aren't plotted as a
-  // line - just a single icon for the latest reading, per the brief.
+  // line - instead a strip of condition icons runs across the top, each
+  // placed at the time it represents, like a forecast strip.
   function drawWeatherChart() {
     const data = weatherReadings;
     const svg = el('chart-weather');
@@ -427,8 +440,8 @@
     }
 
     const W = 1040, H = 400;
-    // Extra top margin makes room for the cloud icon; extra right margin
-    // makes room for a second (wind) tick-label column next to temperature's.
+    // Extra top margin makes room for the condition-icon strip; extra right
+    // margin makes room for a second (wind) tick-label column next to temperature's.
     const marginLeft = 44, marginRight = 64, marginTop = 40, marginBottom = 32;
     const plotW = W - marginLeft - marginRight;
     const plotH = H - marginTop - marginBottom;
@@ -552,22 +565,28 @@
     svg.appendChild(makeEl('circle', { cx: x(times[lastIdx]), cy: yHum(hums[lastIdx]), r: 3, fill: humidityColor }));
     svg.appendChild(makeEl('circle', { cx: x(times[lastIdx]), cy: yWind(winds[lastIdx]), r: 3, fill: windColor }));
 
-    // Cloud cover - a single icon for the latest reading rather than a
-    // plotted line, per the brief ("preferably just icon in top of the graph").
-    const latestCloud = data[lastIdx].cloud_pct;
-    const night = isNightAt(times[lastIdx]);
-    const iconFile = pickCloudIcon(latestCloud, night);
-    svg.appendChild(makeEl('image', {
-      href: 'icon/' + iconFile, x: W / 2 - 14, y: 2, width: 28, height: 28,
-    }));
-    if (typeof latestCloud === 'number') {
-      svg.appendChild(makeEl('text', {
-        x: W / 2, y: 34, 'text-anchor': 'middle', 'font-size': '10'
-      })).textContent = latestCloud.toFixed(0) + '% clouds';
+    // Weather condition icon strip - placed at the time each icon represents
+    // (like the grid's hour ticks), spaced independently from the time-axis
+    // labels so dense ranges (e.g. ALL) don't pack icons into a smear.
+    const ICON_MIN_PX = 30;
+    let iconStepHours = HOUR_STEPS[HOUR_STEPS.length - 1];
+    for (const step of HOUR_STEPS) {
+      const maxIcons = Math.max(1, Math.floor(plotW / ICON_MIN_PX));
+      if (rangeHours / step <= maxIcons) { iconStepHours = step; break; }
     }
 
-    const legendIcon = el('weather-cloud-legend-icon');
-    if (legendIcon) legendIcon.src = 'icon/' + iconFile;
+    const iconTick = new Date(tMin);
+    iconTick.setMinutes(0, 0, 0);
+    if (iconTick.getTime() < tMin) iconTick.setHours(iconTick.getHours() + 1);
+
+    for (; iconTick.getTime() <= tMax; iconTick.setHours(iconTick.getHours() + iconStepHours)) {
+      const t = iconTick.getTime();
+      const row = data[nearestIndex(times, t)];
+      const iconFile = pickWeatherIcon(row.weather_code, isNightAt(t));
+      svg.appendChild(makeEl('image', {
+        href: 'icon/' + iconFile, x: x(t) - 10, y: 2, width: 20, height: 20, class: 'weather-icon',
+      }));
+    }
   }
 
   // Range button handling - refetches from the server with the new window,

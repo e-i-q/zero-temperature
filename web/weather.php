@@ -5,7 +5,10 @@
  * dropped, only the past is returned).
  *
  * Query params (all optional):
- *   ?hours=24    How many hours of history to return (default 48)
+ *   ?delta=-24 hours  SQLite-style datetime() modifier for how far back to
+ *                     go (default -48 hours). Same contract as readings.php's
+ *                     ?delta so both charts can share one range selector;
+ *                     anything not matching DELTA_PATTERN falls back to the default.
  */
 
 declare(strict_types=1);
@@ -13,12 +16,14 @@ declare(strict_types=1);
 // -- Configuration --------------------------------------------------------
 const WEATHER_LATITUDE = 49.1951;  // Brno
 const WEATHER_LONGITUDE = 16.6068;
-const DEFAULT_HOURS = 48;
+const DEFAULT_DELTA = '-48 hours';
+const DELTA_PATTERN = '/^-([1-9][0-9]{0,5}) (minutes|hours|days)$/';
 
-// Open-Meteo's hourly archive only covers a rolling window (max 92 past +
-// a couple of forecast days), same constraint as the sunrise/sunset call
-// in readings.php. Cached for 30 minutes since hourly weather doesn't move
-// fast enough to justify hitting the API on every dashboard poll.
+// past_days=92 is requested below, same as the sunrise/sunset call in
+// readings.php, but Open-Meteo's minutely_15 model data doesn't necessarily
+// keep a full 92 days of history at that resolution - long ranges (7D/ALL)
+// may come back sparser than the hourly archive would provide. Cached for
+// 30 minutes so a busy dashboard isn't re-fetching this every poll.
 const WEATHER_CACHE_TTL = 1800;
 
 header('Content-Type: application/json; charset=utf-8');
@@ -35,10 +40,13 @@ function weatherCachePath(): string {
 }
 
 function fetchWeatherFromApi(): ?array {
+    // minutely_15 instead of hourly - the finest real granularity Open-Meteo
+    // offers (there's no native 10-minute resolution). It doesn't carry
+    // cloud_cover, so weather_code (a WMO code) drives icon selection instead.
     $url = 'https://api.open-meteo.com/v1/forecast?' . http_build_query([
         'latitude'      => WEATHER_LATITUDE,
         'longitude'     => WEATHER_LONGITUDE,
-        'hourly'        => 'temperature_2m,relative_humidity_2m,wind_speed_10m,cloud_cover',
+        'minutely_15'   => 'temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code',
         'timezone'      => 'UTC', // keep instants comparable to recorded_at, which is UTC
         'past_days'     => 92,
         'forecast_days' => 1,
@@ -51,24 +59,24 @@ function fetchWeatherFromApi(): ?array {
     if ($body === false) return null;
 
     $data = json_decode($body, true);
-    $times  = $data['hourly']['time'] ?? null;
-    $temps  = $data['hourly']['temperature_2m'] ?? null;
-    $hums   = $data['hourly']['relative_humidity_2m'] ?? null;
-    $winds  = $data['hourly']['wind_speed_10m'] ?? null;
-    $clouds = $data['hourly']['cloud_cover'] ?? null;
-    if (!$times || !$temps || !$hums || !$winds || !$clouds) return null;
+    $times = $data['minutely_15']['time'] ?? null;
+    $temps = $data['minutely_15']['temperature_2m'] ?? null;
+    $hums  = $data['minutely_15']['relative_humidity_2m'] ?? null;
+    $winds = $data['minutely_15']['wind_speed_10m'] ?? null;
+    $codes = $data['minutely_15']['weather_code'] ?? null;
+    if (!$times || !$temps || !$hums || !$winds || !$codes) return null;
 
     $rows = [];
     foreach ($times as $i => $time) {
-        if ($temps[$i] === null || $hums[$i] === null || $winds[$i] === null || $clouds[$i] === null) {
-            continue; // skip hours with incomplete data rather than plotting gaps
+        if ($temps[$i] === null || $hums[$i] === null || $winds[$i] === null || $codes[$i] === null) {
+            continue; // skip intervals with incomplete data rather than plotting gaps
         }
         $rows[] = [
-            'recorded_at'    => $time . 'Z', // Open-Meteo returns "YYYY-MM-DDTHH:MM" with timezone=UTC
-            'temperature_c'  => round((float) $temps[$i], 2),
-            'humidity_pct'   => round((float) $hums[$i], 2),
+            'recorded_at'   => $time . 'Z', // Open-Meteo returns "YYYY-MM-DDTHH:MM" with timezone=UTC
+            'temperature_c' => round((float) $temps[$i], 2),
+            'humidity_pct'  => round((float) $hums[$i], 2),
             'wind_speed_kmh' => round((float) $winds[$i], 2),
-            'cloud_pct'      => (int) $clouds[$i],
+            'weather_code'  => (int) $codes[$i], // WMO code, used client-side to pick a condition icon
         ];
     }
     return $rows;
@@ -95,17 +103,19 @@ function getWeatherRows(): array {
 }
 
 // -- Parse + validate query params ---------------------------------------
-$hours = isset($_GET['hours']) ? (int) $_GET['hours'] : DEFAULT_HOURS;
-if ($hours < 1 || $hours > 8760) {
-    $hours = DEFAULT_HOURS;
+$delta = isset($_GET['delta']) ? (string) $_GET['delta'] : DEFAULT_DELTA;
+if (!preg_match(DELTA_PATTERN, $delta)) {
+    $delta = DEFAULT_DELTA;
 }
 
 $all = getWeatherRows();
 
-// This is a comparison view, not a forecast - clip to [now-hours, now] so
+// This is a comparison view, not a forecast - clip to [now+delta, now] so
 // no forward-looking data sneaks in from the API's forecast_days=1 buffer.
+// PHP's strtotime() understands the same relative-modifier syntax SQLite's
+// datetime() does (e.g. "-24 hours", "-7 days"), so $delta needs no parsing.
 $nowTs = time();
-$cutoffTs = $nowTs - $hours * 3600;
+$cutoffTs = strtotime($delta, $nowTs);
 $readings = array_values(array_filter($all, function ($r) use ($cutoffTs, $nowTs) {
     $ts = strtotime($r['recorded_at']);
     return $ts !== false && $ts >= $cutoffTs && $ts <= $nowTs;

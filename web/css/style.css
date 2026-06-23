@@ -328,6 +328,20 @@ h1 {
   vertical-align: middle;
 }
 
+/* The icon assets are dark strokes on transparent backgrounds, so they
+   nearly disappear against the dark theme's near-black panels. Inverting
+   turns black into white; light theme leaves them untouched since black
+   already reads fine there. */
+.legend-icon,
+.weather-icon {
+  filter: invert(1);
+}
+
+:root[data-theme="light"] .legend-icon,
+:root[data-theme="light"] .weather-icon {
+  filter: none;
+}
+
 .weather-note {
   font-size: 11px;
   letter-spacing: normal;
