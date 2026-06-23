@@ -1,4 +1,4 @@
-# Zero
+# Zero Temperature
 
 A DHT22 temperature/humidity sensor station for the Raspberry Pi Zero, with a
 live web dashboard.
