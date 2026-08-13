@@ -67,7 +67,7 @@ check_logger_script_exists() {
 install_python_deps() {
   info "Installing Python dependencies for the DHT22 logger…"
   apt-get update -qq
-  apt-get install -y python3-pip
+  apt-get install -y python3-pip libpq5
   pip3 install --break-system-packages adafruit-circuitpython-dht
   pip3 install --break-system-packages psycopg2-binary
   success "Python dependencies installed"
