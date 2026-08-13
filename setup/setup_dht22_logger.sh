@@ -69,6 +69,7 @@ install_python_deps() {
   apt-get update -qq
   apt-get install -y python3-pip
   pip3 install --break-system-packages adafruit-circuitpython-dht
+  pip3 install --break-system-packages psycopg2-binary
   success "Python dependencies installed"
 }
 
