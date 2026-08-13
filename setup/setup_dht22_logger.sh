@@ -63,6 +63,26 @@ check_logger_script_exists() {
     || error "Logger script not found at ${LOGGER_SCRIPT}. Set LOGGER_SCRIPT=<path> and re-run."
 }
 
+check_pgpass() {
+  local home_dir pgpass_file perms
+  home_dir="$(getent passwd "$RUN_USER" | cut -d: -f6)"
+  pgpass_file="${home_dir}/.pgpass"
+
+  if [[ ! -f "$pgpass_file" ]]; then
+    warn "${pgpass_file} not found — remote PostgreSQL mirroring will be skipped until it exists."
+    warn "As ${RUN_USER}, create it with a line like:"
+    warn "  192.168.0.67:5432:sensors:sensor_writer:<password>"
+    warn "then:  chmod 600 ${pgpass_file}"
+    return
+  fi
+
+  perms="$(stat -c '%a' "$pgpass_file")"
+  if [[ "$perms" != "600" ]]; then
+    warn "${pgpass_file} has permissions ${perms}, not 600 — libpq will refuse to use it."
+    warn "Fix with:  chmod 600 ${pgpass_file}"
+  fi
+}
+
 # -- Install --------------------------------------------------------------------
 install_python_deps() {
   info "Installing Python dependencies for the DHT22 logger…"
@@ -112,6 +132,7 @@ main() {
   check_root
   check_user_exists
   check_logger_script_exists
+  check_pgpass
 
   install_python_deps
   setup_cron

@@ -31,6 +31,13 @@ Remote DB:
     The remote write is best-effort — if 192.168.0.67 is unreachable, a
     warning is printed to stderr but the script still exits 0 as long as
     the local SQLite write succeeded.
+
+    Auth: no password is passed in code or read from the environment —
+    psycopg2 (via libpq) picks it up from RUN_USER's ~/.pgpass. That file
+    must exist and be chmod 600, with a line of the form:
+        192.168.0.67:5432:sensors:sensor_writer:<password>
+    If it's missing or unreadable, the connection just fails and is
+    treated like any other unreachable-remote-DB warning.
 """
 
 import argparse
@@ -58,7 +65,9 @@ PG_HOST = "192.168.0.67"
 PG_PORT = 5432              # standard PostgreSQL port
 PG_USER = "sensor_writer"
 PG_DBNAME = "sensors"
-PG_PASS_ENV = "SENSOR_WRITER_PASS"  # env var holding the password
+# Password is NOT stored here or read from the environment — it comes from
+# RUN_USER's ~/.pgpass (chmod 600), which psycopg2/libpq consult automatically
+# when no password= is passed to connect(). See docstring above.
 
 
 def read_samples(pin, samples, delay, max_attempts):
@@ -154,11 +163,6 @@ def store_reading_remote(
 ) -> None:
     """Mirror a reading to the remote PostgreSQL DB. Best-effort: any failure
     (unreachable host, auth error, ...) is logged as a warning, not raised."""
-    pg_pass = os.environ.get(PG_PASS_ENV)
-    if not pg_pass:
-        print(f"WARNING: {PG_PASS_ENV} is not set; skipping remote DB write.", file=sys.stderr)
-        return
-
     insert_sql = """
         INSERT INTO readings (recorded_at, sensor_id, temperature_c, humidity_pct, sample_count)
         VALUES (%s, (SELECT id FROM sensors WHERE name = %s), %s, %s, %s)
@@ -166,8 +170,10 @@ def store_reading_remote(
     params = (timestamp, hostname, round(temperature_c, 2), round(humidity_pct, 2), sample_count)
 
     try:
+        # No password= here on purpose — libpq reads it from ~/.pgpass so it
+        # never has to sit in code, cron, or the environment. See docstring.
         conn = psycopg2.connect(
-            host=PG_HOST, port=PG_PORT, user=PG_USER, password=pg_pass, dbname=PG_DBNAME,
+            host=PG_HOST, port=PG_PORT, user=PG_USER, dbname=PG_DBNAME,
         )
     except psycopg2.OperationalError as e:
         print(f"WARNING: could not connect to remote DB at {PG_HOST}:{PG_PORT}: {e}", file=sys.stderr)
