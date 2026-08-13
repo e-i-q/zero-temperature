@@ -8,6 +8,8 @@
   let allReadings = [];
   let sunTimes = {};
   let weatherReadings = [];
+  let sensorZoom = { start: null, end: null };
+  let weatherZoom = { start: null, end: null };
   let currentRangeDelta = '-24 hours';
   let statusLabel = 'Loading…';
   let nextFetchAt = Date.now() + REFRESH_MS;
@@ -248,7 +250,9 @@
     const temps = data.map(r => r.temperature_c);
     const hums = data.map(r => r.humidity_pct);
 
-    const tMin = Math.min(...times), tMax = Math.max(...times);
+    const dataMin = Math.min(...times), dataMax = Math.max(...times);
+    const tMin = sensorZoom.start ?? dataMin;
+    const tMax = sensorZoom.end ?? dataMax;
     const tempMin = Math.floor(Math.min(...temps) - 1);
     const tempMax = Math.ceil(Math.max(...temps) + 1);
     const humMin = Math.max(0, Math.floor(Math.min(...hums) - 5));
@@ -271,6 +275,11 @@
     const lineStrongColor = cssVar('--line-strong');
     const tempColor = cssVar('--temp');
     const humidityColor = cssVar('--humidity');
+
+    const clipId = 'sensor-plot-clip';
+    const clip = makeEl('clipPath', { id: clipId });
+    clip.appendChild(makeEl('rect', { x: marginLeft, y: marginTop, width: plotW, height: plotH }));
+    svg.appendChild(clip);
 
     // Horizontal gridlines - one thin, slightly transparent line per degree C
     for (let v = Math.ceil(tempMin); v <= Math.floor(tempMax); v++) {
@@ -368,16 +377,17 @@
     const tempAreaPath = `${tempPath} L${x(times[data.length - 1]).toFixed(1)},${baselineY} L${x(times[0]).toFixed(1)},${baselineY} Z`;
     const humAreaPath = `${humPath} L${x(times[data.length - 1]).toFixed(1)},${baselineY} L${x(times[0]).toFixed(1)},${baselineY} Z`;
 
-    svg.appendChild(makeEl('path', { d: humAreaPath, fill: humidityColor, stroke: 'none', 'fill-opacity': 0.08 }));
-    svg.appendChild(makeEl('path', { d: tempAreaPath, fill: tempColor, stroke: 'none', 'fill-opacity': 0.08 }));
-
-    svg.appendChild(makeEl('path', { d: humPath, fill: 'none', stroke: humidityColor, 'stroke-width': 1.5, 'stroke-opacity': 0.85 }));
-    svg.appendChild(makeEl('path', { d: tempPath, fill: 'none', stroke: tempColor, 'stroke-width': 1.75 }));
+    const plotData = makeEl('g', { 'clip-path': `url(#${clipId})` });
+    plotData.appendChild(makeEl('path', { d: humAreaPath, fill: humidityColor, stroke: 'none', 'fill-opacity': 0.08 }));
+    plotData.appendChild(makeEl('path', { d: tempAreaPath, fill: tempColor, stroke: 'none', 'fill-opacity': 0.08 }));
+    plotData.appendChild(makeEl('path', { d: humPath, fill: 'none', stroke: humidityColor, 'stroke-width': 1.5, 'stroke-opacity': 0.85 }));
+    plotData.appendChild(makeEl('path', { d: tempPath, fill: 'none', stroke: tempColor, 'stroke-width': 1.75 }));
 
     // Latest point markers
     const lastIdx = data.length - 1;
-    svg.appendChild(makeEl('circle', { cx: x(times[lastIdx]), cy: yTemp(temps[lastIdx]), r: 3, fill: tempColor }));
-    svg.appendChild(makeEl('circle', { cx: x(times[lastIdx]), cy: yHum(hums[lastIdx]), r: 3, fill: humidityColor }));
+    plotData.appendChild(makeEl('circle', { cx: x(times[lastIdx]), cy: yTemp(temps[lastIdx]), r: 3, fill: tempColor }));
+    plotData.appendChild(makeEl('circle', { cx: x(times[lastIdx]), cy: yHum(hums[lastIdx]), r: 3, fill: humidityColor }));
+    svg.appendChild(plotData);
   }
 
   // Picks a glanceable weather-condition icon from a WMO weather_code. There's
@@ -451,7 +461,9 @@
     const hums = data.map(r => r.humidity_pct);
     const winds = data.map(r => r.wind_speed_kmh);
 
-    const tMin = Math.min(...times), tMax = Math.max(...times);
+    const dataMin = Math.min(...times), dataMax = Math.max(...times);
+    const tMin = weatherZoom.start ?? dataMin;
+    const tMax = weatherZoom.end ?? dataMax;
     const tempMin = Math.floor(Math.min(...temps) - 1);
     const tempMax = Math.ceil(Math.max(...temps) + 1);
     const humMin = Math.max(0, Math.floor(Math.min(...hums) - 5));
@@ -476,6 +488,11 @@
     const tempColor = cssVar('--temp');
     const humidityColor = cssVar('--humidity');
     const windColor = cssVar('--wind');
+
+    const clipId = 'weather-plot-clip';
+    const clip = makeEl('clipPath', { id: clipId });
+    clip.appendChild(makeEl('rect', { x: marginLeft, y: marginTop, width: plotW, height: plotH }));
+    svg.appendChild(clip);
 
     // Horizontal gridlines - one per degree C, same convention as the sensor chart
     for (let v = Math.ceil(tempMin); v <= Math.floor(tempMax); v++) {
@@ -552,18 +569,19 @@
     const tempAreaPath = `${tempPath} L${x(times[data.length - 1]).toFixed(1)},${baselineY} L${x(times[0]).toFixed(1)},${baselineY} Z`;
     const humAreaPath = `${humPath} L${x(times[data.length - 1]).toFixed(1)},${baselineY} L${x(times[0]).toFixed(1)},${baselineY} Z`;
 
-    svg.appendChild(makeEl('path', { d: humAreaPath, fill: humidityColor, stroke: 'none', 'fill-opacity': 0.08 }));
-    svg.appendChild(makeEl('path', { d: tempAreaPath, fill: tempColor, stroke: 'none', 'fill-opacity': 0.08 }));
-
-    svg.appendChild(makeEl('path', { d: humPath, fill: 'none', stroke: humidityColor, 'stroke-width': 1.5, 'stroke-opacity': 0.85 }));
-    svg.appendChild(makeEl('path', { d: windPath, fill: 'none', stroke: windColor, 'stroke-width': 1.25, 'stroke-opacity': 0.85, 'stroke-dasharray': '4,2' }));
-    svg.appendChild(makeEl('path', { d: tempPath, fill: 'none', stroke: tempColor, 'stroke-width': 1.75 }));
+    const plotData = makeEl('g', { 'clip-path': `url(#${clipId})` });
+    plotData.appendChild(makeEl('path', { d: humAreaPath, fill: humidityColor, stroke: 'none', 'fill-opacity': 0.08 }));
+    plotData.appendChild(makeEl('path', { d: tempAreaPath, fill: tempColor, stroke: 'none', 'fill-opacity': 0.08 }));
+    plotData.appendChild(makeEl('path', { d: humPath, fill: 'none', stroke: humidityColor, 'stroke-width': 1.5, 'stroke-opacity': 0.85 }));
+    plotData.appendChild(makeEl('path', { d: windPath, fill: 'none', stroke: windColor, 'stroke-width': 1.25, 'stroke-opacity': 0.85, 'stroke-dasharray': '4,2' }));
+    plotData.appendChild(makeEl('path', { d: tempPath, fill: 'none', stroke: tempColor, 'stroke-width': 1.75 }));
 
     // Latest point markers
     const lastIdx = data.length - 1;
-    svg.appendChild(makeEl('circle', { cx: x(times[lastIdx]), cy: yTemp(temps[lastIdx]), r: 3, fill: tempColor }));
-    svg.appendChild(makeEl('circle', { cx: x(times[lastIdx]), cy: yHum(hums[lastIdx]), r: 3, fill: humidityColor }));
-    svg.appendChild(makeEl('circle', { cx: x(times[lastIdx]), cy: yWind(winds[lastIdx]), r: 3, fill: windColor }));
+    plotData.appendChild(makeEl('circle', { cx: x(times[lastIdx]), cy: yTemp(temps[lastIdx]), r: 3, fill: tempColor }));
+    plotData.appendChild(makeEl('circle', { cx: x(times[lastIdx]), cy: yHum(hums[lastIdx]), r: 3, fill: humidityColor }));
+    plotData.appendChild(makeEl('circle', { cx: x(times[lastIdx]), cy: yWind(winds[lastIdx]), r: 3, fill: windColor }));
+    svg.appendChild(plotData);
 
     // Weather condition icon strip - placed at the time each icon represents
     // (like the grid's hour ticks), spaced independently from the time-axis
@@ -598,6 +616,8 @@
     btn.classList.add('active');
     currentRangeDelta = btn.dataset.delta;
     localStorage.setItem(RANGE_STORAGE_KEY, currentRangeDelta);
+    sensorZoom.start = sensorZoom.end = null;
+    weatherZoom.start = weatherZoom.end = null;
     loadData();
   });
 
@@ -628,6 +648,92 @@
     if (allReadings.length) drawChart();
     if (weatherReadings.length) drawWeatherChart();
   });
+
+  function addWheelZoom(svgId, zoom, getTimeFn, redrawFn, mLeft, mRight) {
+    el(svgId).addEventListener('wheel', (e) => {
+      const times = getTimeFn();
+      if (times.length < 2) return;
+      e.preventDefault();
+      const W = 1040, plotW = W - mLeft - mRight;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const scale = W / rect.width;
+      const dataMin = Math.min(...times), dataMax = Math.max(...times);
+      const curMin = zoom.start ?? dataMin, curMax = zoom.end ?? dataMax;
+      const cx = (e.clientX - rect.left) * scale;
+      const frac = Math.max(0, Math.min(1, (cx - mLeft) / plotW));
+      const pivotT = curMin + frac * (curMax - curMin);
+      const factor = e.deltaY > 0 ? 1.25 : 0.8;
+      const newSpan = (curMax - curMin) * factor;
+      let newMin = pivotT - frac * newSpan;
+      let newMax = pivotT + (1 - frac) * newSpan;
+      if (newMin < dataMin) { newMax = Math.min(dataMax, newMax + dataMin - newMin); newMin = dataMin; }
+      if (newMax > dataMax) { newMin = Math.max(dataMin, newMin - (newMax - dataMax)); newMax = dataMax; }
+      newMin = Math.max(dataMin, newMin);
+      newMax = Math.min(dataMax, newMax);
+      if (newMin <= dataMin && newMax >= dataMax) {
+        zoom.start = zoom.end = null;
+      } else {
+        zoom.start = newMin;
+        zoom.end = newMax;
+      }
+      redrawFn();
+    }, { passive: false });
+  }
+
+  function addPanDrag(svgId, zoom, getTimeFn, redrawFn, mLeft, mRight) {
+    const svgEl = el(svgId);
+    svgEl.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      const times = getTimeFn();
+      if (times.length < 2) return;
+      e.preventDefault();
+      const dataMin = Math.min(...times), dataMax = Math.max(...times);
+      const drag = {
+        startX: e.clientX,
+        startMin: zoom.start ?? dataMin,
+        startMax: zoom.end ?? dataMax,
+        dataMin, dataMax,
+      };
+      svgEl.classList.add('dragging');
+
+      function onMove(e) {
+        const W = 1040, plotW = W - mLeft - mRight;
+        const rect = svgEl.getBoundingClientRect();
+        const dx = (e.clientX - drag.startX) * (W / rect.width);
+        const dt = -(dx / plotW) * (drag.startMax - drag.startMin);
+        let newMin = drag.startMin + dt;
+        let newMax = drag.startMax + dt;
+        if (newMin < drag.dataMin) { newMax += drag.dataMin - newMin; newMin = drag.dataMin; }
+        if (newMax > drag.dataMax) { newMin -= newMax - drag.dataMax; newMax = drag.dataMax; }
+        zoom.start = newMin <= drag.dataMin && newMax >= drag.dataMax ? null : newMin;
+        zoom.end   = newMin <= drag.dataMin && newMax >= drag.dataMax ? null : newMax;
+        redrawFn();
+      }
+
+      function onUp() {
+        svgEl.classList.remove('dragging');
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      }
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  }
+
+  addWheelZoom('chart', sensorZoom,
+    () => allReadings.map(r => new Date(r.recorded_at).getTime()),
+    drawChart, 44, 44);
+  addWheelZoom('chart-weather', weatherZoom,
+    () => weatherReadings.map(r => new Date(r.recorded_at).getTime()),
+    drawWeatherChart, 44, 64);
+
+  addPanDrag('chart', sensorZoom,
+    () => allReadings.map(r => new Date(r.recorded_at).getTime()),
+    drawChart, 44, 44);
+  addPanDrag('chart-weather', weatherZoom,
+    () => weatherReadings.map(r => new Date(r.recorded_at).getTime()),
+    drawWeatherChart, 44, 64);
 
   loadData();
   setInterval(loadData, REFRESH_MS);

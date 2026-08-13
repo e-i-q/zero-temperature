@@ -265,6 +265,14 @@ h1 {
   margin-bottom: 16px;
 }
 
+.chart-frame svg {
+  cursor: grab;
+}
+
+.chart-frame svg.dragging {
+  cursor: grabbing;
+}
+
 .stats-cell { justify-content: center; }
 
 #stats-table {
