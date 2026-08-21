@@ -1,13 +1,21 @@
 (function () {
   const READINGS_URL = 'api/readings.php';
   const DAILY_URL = 'api/daily.php';
+  const FORECAST_URL = 'api/forecast.php';
   const REFRESH_MS = 60000; // poll for new data every minute
+  const FORECAST_REFRESH_MS = REFRESH_MS * 5; // forecast.php itself caches Open-Meteo for 30min
   const RANGE_STORAGE_KEY = 'hiveRange';
+  const FORECAST_RANGE_STORAGE_KEY = 'hiveForecastRange';
+  // Mirrors api/forecast.php's RANGE_HOURS — used client-side only to decide
+  // whether to show the "clamped to Open-Meteo's max" note; the server does
+  // the actual clamping.
+  const FORECAST_RANGE_HOURS = { '12h': 12, '24h': 24, '2d': 48, '5d': 120, '1m': 16 * 24, all: 16 * 24 };
   const MAX_CHART_POINTS = 1500; // per-sensor downsample cap for the two timeline charts
   const GRID_COLOR = '#1d1f20'; // --color-text, used for hairline gridlines/night bands
 
   const ns = 'http://www.w3.org/2000/svg';
   const el = (id) => document.getElementById(id);
+  const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   const makeEl = (tag, attrs) => {
     const e = document.createElementNS(ns, tag);
     for (const k in attrs) e.setAttribute(k, attrs[k]);
@@ -30,6 +38,10 @@
   let statusLabel = 'Loading…';
   let nextFetchAt = Date.now() + REFRESH_MS;
   let chartGeom = {};      // svgId -> x/y mapping of its last render, for the linked crosshair
+
+  let forecastRange = localStorage.getItem(FORECAST_RANGE_STORAGE_KEY) || '24h';
+  let forecastReadings = []; // Open-Meteo hourly forecast rows, api/forecast.php's shape
+  let forecastLoaded = false; // loaded lazily, the first time the Forecast tab is opened
 
   function fmtTime(iso) {
     const d = new Date(iso);
@@ -112,6 +124,25 @@
       drawLongChart();
     } catch (err) {
       console.error('Failed to load 12-month history:', err.message);
+    }
+  }
+
+  async function loadForecast() {
+    try {
+      const payload = await fetchJson(`${FORECAST_URL}?range=${encodeURIComponent(forecastRange)}`);
+      forecastReadings = payload.readings || [];
+      el('forecast-empty-state').hidden = forecastReadings.length > 0;
+      el('section-forecast').style.display = forecastReadings.length ? 'block' : 'none';
+      drawForecastChart();
+      const rangeHours = FORECAST_RANGE_HOURS[forecastRange] ?? FORECAST_RANGE_HOURS['24h'];
+      const clamped = rangeHours > payload.forecast_days_max * 24;
+      el('forecast-note').textContent = clamped
+        ? `shaded bands = approx. night (20:00–06:00) · Open-Meteo only forecasts ${payload.forecast_days_max} days ahead — showing the max available`
+        : 'shaded bands = approx. night (20:00–06:00)';
+      el('forecast-footer-count').textContent = payload.count + ' forecast hour' + (payload.count === 1 ? '' : 's');
+      el('forecast-footer-generated').textContent = 'Queried ' + fmtTime(payload.generated_at);
+    } catch (err) {
+      console.error('Failed to load forecast:', err.message);
     }
   }
 
@@ -387,11 +418,22 @@
     return bands.map(([a, b]) => [Math.max(a, tMin), Math.min(b, tMax)]).filter(([a, b]) => b > a);
   }
 
+  const HOUR_STEPS = [1, 2, 3, 4, 6, 8, 12, 24, 48, 72, 168, 336, 720, 1440];
+
   function hourTickStep(rangeHours, plotW) {
-    const HOUR_STEPS = [1, 2, 3, 4, 6, 8, 12, 24, 48, 72, 168, 336, 720, 1440];
     for (const step of HOUR_STEPS) {
       const labelWidthPx = step >= 24 ? 54 : 14;
       const maxTicks = Math.max(2, Math.floor(plotW / labelWidthPx));
+      if (rangeHours / step <= maxTicks) return step;
+    }
+    return HOUR_STEPS[HOUR_STEPS.length - 1];
+  }
+
+  // Same idea as hourTickStep, but for spacing fixed-size items (icons)
+  // rather than text labels whose width varies with the tick format.
+  function stepHoursForPx(rangeHours, plotW, minPxPerItem) {
+    for (const step of HOUR_STEPS) {
+      const maxTicks = Math.max(1, Math.floor(plotW / minPxPerItem));
       if (rangeHours / step <= maxTicks) return step;
     }
     return HOUR_STEPS[HOUR_STEPS.length - 1];
@@ -539,6 +581,144 @@
     }
   }
 
+  // -- Forecast tab — Open-Meteo hourly forecast for Brno (temperature,
+  //    humidity, wind, condition icons). Ported from rpi-zero's
+  //    drawWeatherChart(): same combo-chart shape (one dual-axis line chart
+  //    plus an icon strip), the only real difference being that this plots
+  //    api/forecast.php's forward-looking rows instead of a historical
+  //    comparison. Night bands reuse the same fixed 20:00-06:00
+  //    approximation as the Overview charts (see nightBands() above) rather
+  //    than rpi-zero's real sunrise/sunset markers, since the Hive has no
+  //    sun_times data to draw from. -------------------------------------------
+  function pickWeatherIcon(weatherCode, night) {
+    if (typeof weatherCode !== 'number') return 'cloud-48.png';
+    if (weatherCode === 0) return night ? 'night-48.png' : 'sun-48.png';
+    if (weatherCode === 1 || weatherCode === 2) return 'partly-cloudy-day-48.png';
+    if (weatherCode === 3 || weatherCode === 45 || weatherCode === 48) return 'clouds-48.png';
+    if (weatherCode >= 51) return 'cloud-lightning-48.png';
+    return 'cloud-48.png';
+  }
+
+  function isNightApprox(t) {
+    const h = new Date(t).getHours();
+    return h >= 20 || h < 6;
+  }
+
+  function drawForecastChart() {
+    const svg = el('chart-forecast');
+    svg.innerHTML = '';
+    const data = forecastReadings;
+    const W = 1000, H = 240;
+    // Extra top margin makes room for the condition-icon strip.
+    const marginLeft = 46, marginRight = 46, marginTop = 40, marginBottom = 28;
+    const plotW = W - marginLeft - marginRight;
+    const plotH = H - marginTop - marginBottom;
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+    if (data.length < 2) {
+      svg.appendChild(makeEl('text', { x: W / 2, y: H / 2, 'text-anchor': 'middle', 'font-size': 13 })).textContent = 'No forecast data yet';
+      return;
+    }
+
+    const times = data.map((r) => new Date(r.recorded_at).getTime());
+    const temps = data.map((r) => r.temperature_c);
+    const hums = data.map((r) => r.humidity_pct);
+    const winds = data.map((r) => r.wind_speed_kmh);
+
+    const tMin = times[0], tMax = times[times.length - 1];
+    const tempMin = Math.floor(Math.min(...temps) - 1);
+    const tempMax = Math.ceil(Math.max(...temps) + 1);
+    const humMin = 0, humMax = 100; // full physical range, same convention as the Overview humidity chart
+    const windMin = 0, windMax = Math.max(5, Math.ceil(Math.max(...winds) + 2));
+
+    const x = (t) => marginLeft + ((t - tMin) / (tMax - tMin || 1)) * plotW;
+    const yTemp = (v) => marginTop + plotH - ((v - tempMin) / (tempMax - tempMin || 1)) * plotH;
+    const yHum = (v) => marginTop + plotH - ((v - humMin) / (humMax - humMin || 1)) * plotH;
+    const yWind = (v) => marginTop + plotH - ((v - windMin) / (windMax - windMin || 1)) * plotH;
+
+    const tempColor = cssVar('--temp');
+    const humidityColor = cssVar('--humidity');
+    const windColor = cssVar('--wind');
+
+    for (const [a, b] of nightBands(tMin, tMax)) {
+      svg.appendChild(makeEl('rect', { x: x(a), y: marginTop, width: Math.max(0, x(b) - x(a)), height: plotH, fill: GRID_COLOR, 'fill-opacity': 0.05 }));
+    }
+
+    // Horizontal gridlines - one per degree C
+    for (let v = Math.ceil(tempMin); v <= Math.floor(tempMax); v++) {
+      svg.appendChild(makeEl('line', { x1: marginLeft, x2: W - marginRight, y1: yTemp(v), y2: yTemp(v), stroke: GRID_COLOR, 'stroke-opacity': 0.1, 'stroke-width': 1 }));
+    }
+
+    // Vertical gridlines + time labels - same stepping logic as the Overview charts
+    const rangeHours = (tMax - tMin) / 3600000;
+    const stepHours = hourTickStep(rangeHours, plotW);
+    const tick = new Date(tMin);
+    tick.setMinutes(0, 0, 0);
+    if (tick.getTime() < tMin) tick.setHours(tick.getHours() + 1);
+    for (; tick.getTime() <= tMax; tick.setHours(tick.getHours() + stepHours)) {
+      const xPos = x(tick.getTime());
+      const isMidnight = tick.getHours() === 0;
+      svg.appendChild(makeEl('line', { x1: xPos, x2: xPos, y1: marginTop, y2: H - marginBottom, stroke: GRID_COLOR, 'stroke-opacity': isMidnight ? 0.3 : 0.1, 'stroke-width': 1 }));
+      const label = (stepHours >= 24 || isMidnight) ? tick.toLocaleString(undefined, { month: 'short', day: 'numeric' }) : String(tick.getHours()).padStart(2, '0');
+      svg.appendChild(makeEl('text', { x: xPos, y: H - 8, 'text-anchor': 'middle', 'font-size': 10 })).textContent = label;
+    }
+
+    // Y-axis labels - temperature (right, one per whole degree alongside its gridlines)
+    for (let v = Math.ceil(tempMin); v <= Math.floor(tempMax); v++) {
+      svg.appendChild(makeEl('text', { x: W - marginRight + 8, y: yTemp(v) + 4, 'text-anchor': 'start', 'font-size': 10, fill: tempColor })).textContent = v.toFixed(0) + '°';
+    }
+
+    // Y-axis labels - wind speed, km/h (far right, fewer ticks to avoid crowding)
+    for (let i = 0; i <= 4; i++) {
+      const v = windMin + ((windMax - windMin) / 4) * (4 - i);
+      const y = marginTop + (plotH / 4) * i;
+      svg.appendChild(makeEl('text', { x: W - 4, y: y + 4, 'text-anchor': 'end', 'font-size': 9, fill: windColor })).textContent = v.toFixed(0);
+    }
+
+    // Y-axis labels - humidity (left)
+    for (let i = 0; i <= 4; i++) {
+      const v = humMin + ((humMax - humMin) / 4) * (4 - i);
+      const y = marginTop + (plotH / 4) * i;
+      svg.appendChild(makeEl('text', { x: marginLeft - 8, y: y + 4, 'text-anchor': 'end', 'font-size': 10, fill: humidityColor })).textContent = v.toFixed(0) + '%';
+    }
+
+    // Build path strings + filled area under temp/humidity, closed to the plot baseline
+    const tempPath = data.map((r, i) => (i === 0 ? 'M' : 'L') + x(times[i]).toFixed(1) + ',' + yTemp(r.temperature_c).toFixed(1)).join(' ');
+    const humPath = data.map((r, i) => (i === 0 ? 'M' : 'L') + x(times[i]).toFixed(1) + ',' + yHum(r.humidity_pct).toFixed(1)).join(' ');
+    const windPath = data.map((r, i) => (i === 0 ? 'M' : 'L') + x(times[i]).toFixed(1) + ',' + yWind(r.wind_speed_kmh).toFixed(1)).join(' ');
+    const baselineY = H - marginBottom;
+    const tempAreaPath = `${tempPath} L${x(times[data.length - 1]).toFixed(1)},${baselineY} L${x(times[0]).toFixed(1)},${baselineY} Z`;
+    const humAreaPath = `${humPath} L${x(times[data.length - 1]).toFixed(1)},${baselineY} L${x(times[0]).toFixed(1)},${baselineY} Z`;
+
+    const clipId = 'forecast-plot-clip';
+    const clip = makeEl('clipPath', { id: clipId });
+    clip.appendChild(makeEl('rect', { x: marginLeft, y: marginTop, width: plotW, height: plotH }));
+    svg.appendChild(clip);
+
+    const plotData = makeEl('g', { 'clip-path': `url(#${clipId})` });
+    plotData.appendChild(makeEl('path', { d: humAreaPath, fill: humidityColor, stroke: 'none', 'fill-opacity': 0.08 }));
+    plotData.appendChild(makeEl('path', { d: tempAreaPath, fill: tempColor, stroke: 'none', 'fill-opacity': 0.08 }));
+    plotData.appendChild(makeEl('path', { d: humPath, fill: 'none', stroke: humidityColor, 'stroke-width': 1.5, 'stroke-opacity': 0.85 }));
+    plotData.appendChild(makeEl('path', { d: windPath, fill: 'none', stroke: windColor, 'stroke-width': 1.25, 'stroke-opacity': 0.85, 'stroke-dasharray': '4,2' }));
+    plotData.appendChild(makeEl('path', { d: tempPath, fill: 'none', stroke: tempColor, 'stroke-width': 1.75 }));
+    svg.appendChild(plotData);
+
+    // Weather condition icon strip - one icon per tick, spaced independently
+    // from the time-axis labels so long ranges (e.g. 1M/ALL) don't smear
+    // icons together.
+    const ICON_MIN_PX = 30;
+    const iconStepHours = stepHoursForPx(rangeHours, plotW, ICON_MIN_PX);
+    const iconTick = new Date(tMin);
+    iconTick.setMinutes(0, 0, 0);
+    if (iconTick.getTime() < tMin) iconTick.setHours(iconTick.getHours() + 1);
+    for (; iconTick.getTime() <= tMax; iconTick.setHours(iconTick.getHours() + iconStepHours)) {
+      const t = iconTick.getTime();
+      const row = data[nearestIndex(times, t)];
+      const iconFile = pickWeatherIcon(row.weather_code, isNightApprox(t));
+      svg.appendChild(makeEl('image', { href: 'icon/' + iconFile, x: x(t) - 10, y: 2, width: 20, height: 20, class: 'weather-icon' }));
+    }
+  }
+
   // -- Linked crosshair + shared tooltip (temp + humidity charts) -------------
   function hideCrosshair() {
     for (const id of ['chart-temp', 'chart-hum']) {
@@ -623,16 +803,48 @@
   }
 
   // -- Range chips --------------------------------------------------------------
+  // Scoped to each panel's own chip group — #range-chips and
+  // #forecast-range-chips both use the shared .chip class, so a global
+  // querySelectorAll('.chip') here would also clear the other panel's
+  // selection.
   document.getElementById('range-chips').addEventListener('click', (e) => {
     const btn = e.target.closest('.chip');
     if (!btn) return;
-    document.querySelectorAll('.chip').forEach((b) => b.classList.remove('active'));
+    document.querySelectorAll('#range-chips .chip').forEach((b) => b.classList.remove('active'));
     btn.classList.add('active');
     currentRange = btn.dataset.range;
     localStorage.setItem(RANGE_STORAGE_KEY, currentRange);
     loadReadings();
   });
-  document.querySelectorAll('.chip').forEach((b) => b.classList.toggle('active', b.dataset.range === currentRange));
+  document.querySelectorAll('#range-chips .chip').forEach((b) => b.classList.toggle('active', b.dataset.range === currentRange));
+
+  document.getElementById('forecast-range-chips').addEventListener('click', (e) => {
+    const btn = e.target.closest('.chip');
+    if (!btn) return;
+    document.querySelectorAll('#forecast-range-chips .chip').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    forecastRange = btn.dataset.range;
+    localStorage.setItem(FORECAST_RANGE_STORAGE_KEY, forecastRange);
+    loadForecast();
+  });
+  document.querySelectorAll('#forecast-range-chips .chip').forEach((b) => b.classList.toggle('active', b.dataset.range === forecastRange));
+
+  // -- Tabs -----------------------------------------------------------------
+  // The Forecast tab's data is fetched lazily, the first time it's opened,
+  // so a visit that never leaves Overview costs nothing extra against
+  // Open-Meteo.
+  document.getElementById('tabs').addEventListener('click', (e) => {
+    const btn = e.target.closest('.tab');
+    if (!btn) return;
+    const tab = btn.dataset.tab;
+    document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b === btn));
+    document.querySelectorAll('.tab-panel').forEach((p) => { p.hidden = p.dataset.panel !== tab; });
+    if (tab === 'forecast' && !forecastLoaded) {
+      forecastLoaded = true;
+      loadForecast();
+      setInterval(loadForecast, FORECAST_REFRESH_MS);
+    }
+  });
 
   attachCrosshair('chart-temp');
   attachCrosshair('chart-hum');

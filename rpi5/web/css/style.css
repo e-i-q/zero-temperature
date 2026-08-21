@@ -37,6 +37,14 @@
   --status-good-bg: #eaf5ea;
   --status-good-text: #0ca30c;
   --status-offline-bg: rgba(29, 31, 32, 0.06);
+
+  /* -- Forecast tab accents — same light-theme values as rpi-zero's
+        weather chart (../rpi-zero/web/css/style.css), kept separate from
+        --series-* since they label fixed metrics (temp/humidity/wind),
+        not a cycled per-sensor palette. -------------------------------- */
+  --temp: #c1502e;
+  --humidity: #3a5a78;
+  --wind: #4c8a5e;
 }
 
 * { box-sizing: border-box; }
@@ -120,9 +128,14 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--color-text-muted);
-  padding-bottom: 2px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 0 0 2px;
+  cursor: pointer;
 }
-.tab.active { color: var(--color-text); border-bottom: 2px solid var(--color-accent); }
+.tab:hover { color: var(--color-text); }
+.tab.active { color: var(--color-text); border-bottom-color: var(--color-accent); }
 
 .status { font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted); }
 
@@ -167,7 +180,14 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
   padding: 0;
 }
 .legend-item.dim { opacity: 0.35; }
+.legend-item.static { cursor: default; }
 .legend-swatch { width: 13px; height: 2px; flex: none; }
+
+/* -- Tab panels -------------------------------------------------------------- */
+.tab-panel[hidden] { display: none; }
+
+/* -- Weather condition icon strip (Forecast tab) ---------------------------- */
+.weather-icon { pointer-events: none; }
 
 /* -- Sensor tiles ----------------------------------------------------------- */
 .tile-grid {

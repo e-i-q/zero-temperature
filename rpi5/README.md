@@ -10,7 +10,9 @@ Raspberry Pi 5 that already hosts the Hive database. The sensor-node half,
 Visual design follows [`../IoT Temperature Dashboard Wireframe`](<../IoT Temperature Dashboard Wireframe>)
 (option 1a — tiles over stacked overlay charts): a tile per sensor, combined
 temperature/humidity timelines with a linked crosshair, and a 12-month
-long-term view.
+long-term view. A second tab, Forecast, shows the Open-Meteo forecast for
+the same location the sensors are in — ported from `../rpi-zero`'s weather
+comparison chart, but looking forward instead of back.
 
 ```
 PostgreSQL (Hive, this Pi)  →  api/readings.php, api/daily.php  →  dashboard
@@ -20,10 +22,11 @@ PostgreSQL (Hive, this Pi)  →  api/readings.php, api/daily.php  →  dashboard
 
 | Path | Purpose |
 |---|---|
-| `web/index.html`, `web/css/`, `web/js/` | Dashboard: per-sensor tiles, temperature/humidity timelines, 12-month long-term chart, recent-readings table |
+| `web/index.html`, `web/css/`, `web/js/` | Dashboard: Overview tab (per-sensor tiles, temperature/humidity timelines, 12-month long-term chart, recent-readings table) and Forecast tab (Open-Meteo forecast chart) |
 | `web/api/db.php` | Shared read-only PDO connection to the Hive database |
 | `web/api/readings.php` | JSON API: every sensor's readings in a requested time window, plus latest/min/avg/max per sensor |
 | `web/api/daily.php` | JSON API: 12 months of daily mean/min/max temperature per sensor, aggregated in PostgreSQL |
+| `web/api/forecast.php` | JSON API: Open-Meteo hourly forecast (temperature/humidity/wind/condition) for the Forecast tab. No database — a cached proxy, same pattern as `../rpi-zero/web/weather.php` |
 | `setup/setup_nginx_php.sh` | Installs and configures nginx + PHP-FPM (with `pdo_pgsql`) |
 | `setup/deploy_web.sh` | Syncs `web/` into the nginx web root |
 | `setup/lib/log.sh` | Shared colored logging + quiet-by-default install output for the scripts above |
@@ -90,3 +93,10 @@ After setup, the dashboard is served at `http://<pi5-address>/`.
 - **Offline sensors**: a sensor with no reading in the last 30 minutes
   (`OFFLINE_MINUTES` in `readings.php`) is shown greyed-out with a "last
   seen" time, rather than silently disappearing from the tile grid.
+- **Forecast tab**: `forecast.php` reuses the Overview tab's range-chip UI
+  (12H/24H/2D/5D/1M/ALL) so both tabs feel the same, but it's inherently a
+  forward-looking window — Open-Meteo's free `/v1/forecast` endpoint only
+  looks `FORECAST_DAYS_MAX` (16) days ahead, so 1M/ALL are both clamped to
+  that ceiling instead of their literal meaning. Fetched lazily (only once
+  the tab is first opened) and cached server-side for 30 minutes, same as
+  `../rpi-zero/web/weather.php`.
