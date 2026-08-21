@@ -32,6 +32,15 @@ WEB_ROOT="${WEB_ROOT:-/var/www/html}"
 SITE_NAME="${SITE_NAME:-default}"
 RUN_USER="${RUN_USER:-www-data}"   # nginx/PHP-FPM run as this user
 
+# Must match web/api/db.php's PG_HOST/PG_PORT/PG_DBNAME/PG_USER constants.
+PG_HOST="${PG_HOST:-127.0.0.1}"
+PG_PORT="${PG_PORT:-5432}"
+PG_DBNAME="${PG_DBNAME:-sensors}"
+PG_ROLE="${PG_ROLE:-web_reader}"
+# WEB_READER_PASSWORD: set this beforehand to skip the interactive prompt
+# (e.g. for unattended installs); otherwise prompt_for_password() below asks
+# for it once, at the start of the run.
+
 # =============================================================================
 banner() {
   echo -e "${CYAN}"
@@ -39,6 +48,29 @@ banner() {
   echo "|   nginx + PHP-FPM Installer — Raspberry Pi 5 (Hive)  |"
   echo "+------------------------------------------------------+"
   echo -e "${NC}"
+}
+
+# -- www-data's PostgreSQL credentials -----------------------------------------
+# Asked up front, before any package installation, so the run isn't
+# interrupted partway through waiting on input.
+prompt_for_password() {
+  if [[ -n "${WEB_READER_PASSWORD:-}" ]]; then
+    info "Using WEB_READER_PASSWORD from the environment for '${PG_ROLE}'"
+    return
+  fi
+  if [[ ! -t 0 ]]; then
+    warn "Not running interactively and WEB_READER_PASSWORD is not set —"
+    warn "~/.pgpass will not be configured automatically. Set WEB_READER_PASSWORD"
+    warn "and re-run, or configure ~/.pgpass by hand afterwards (see README)."
+    return
+  fi
+
+  info "The dashboard connects to the Hive database (${PG_HOST}:${PG_PORT}/${PG_DBNAME})"
+  info "as the '${PG_ROLE}' role — this is the same password used when that role"
+  info "was created by the db project's setup_db.py (WEB_READER_PASSWORD there)."
+  read -r -s -p "Enter the PostgreSQL password for '${PG_ROLE}' (leave blank to configure ~/.pgpass manually later): " WEB_READER_PASSWORD
+  echo
+  export WEB_READER_PASSWORD
 }
 
 # -- Preflight -----------------------------------------------------------------
@@ -97,25 +129,43 @@ verify_pgsql_extension() {
   fi
 }
 
-# -- www-data's PostgreSQL credentials -----------------------------------------
-check_pgpass() {
-  local home_dir pgpass_file perms
+# Writes/updates RUN_USER's ~/.pgpass with the line the dashboard's API
+# endpoints need to authenticate, using the password prompt_for_password()
+# collected. Idempotent: re-running with a new password replaces the old
+# line for this host:port:db:role rather than appending a duplicate.
+setup_pgpass() {
+  local home_dir pgpass_file match_prefix line
+
   home_dir="$(getent passwd "$RUN_USER" | cut -d: -f6)"
+  if [[ -z "$home_dir" || "$home_dir" == "/nonexistent" ]]; then
+    warn "Could not find a usable home directory for '${RUN_USER}' (getent says '${home_dir:-<empty>}')."
+    warn "Set one (e.g. 'usermod -d /var/www ${RUN_USER}') or create ~/.pgpass by hand — see README."
+    return
+  fi
   pgpass_file="${home_dir}/.pgpass"
 
-  if [[ ! -f "$pgpass_file" ]]; then
-    warn "${pgpass_file} not found — the dashboard's API endpoints will fail to"
-    warn "connect until it exists. As root (or via sudo -u ${RUN_USER}), create it with:"
-    warn "  127.0.0.1:5432:sensors:web_reader:<password>"
-    warn "then:  chmod 600 ${pgpass_file}; chown ${RUN_USER} ${pgpass_file}"
+  if [[ -z "${WEB_READER_PASSWORD:-}" ]]; then
+    warn "No password collected — skipping ~/.pgpass setup."
+    warn "The dashboard's API endpoints will fail to connect until ${pgpass_file} exists:"
+    warn "  ${PG_HOST}:${PG_PORT}:${PG_DBNAME}:${PG_ROLE}:<password>   (chmod 600, owned by ${RUN_USER})"
     return
   fi
 
-  perms="$(stat -c '%a' "$pgpass_file")"
-  if [[ "$perms" != "600" ]]; then
-    warn "${pgpass_file} has permissions ${perms}, not 600 — libpq will refuse to use it."
-    warn "Fix with:  chmod 600 ${pgpass_file}"
+  mkdir -p "$home_dir"
+  touch "$pgpass_file"
+
+  match_prefix="${PG_HOST}:${PG_PORT}:${PG_DBNAME}:${PG_ROLE}:"
+  line="${match_prefix}${WEB_READER_PASSWORD}"
+  if grep -qF "$match_prefix" "$pgpass_file" 2>/dev/null; then
+    info "Replacing existing ~/.pgpass entry for ${PG_HOST}:${PG_PORT}/${PG_DBNAME} (${PG_ROLE})"
+    grep -vF "$match_prefix" "$pgpass_file" > "${pgpass_file}.tmp"
+    mv "${pgpass_file}.tmp" "$pgpass_file"
   fi
+  echo "$line" >> "$pgpass_file"
+
+  chown "${RUN_USER}:${RUN_USER}" "$pgpass_file"
+  chmod 600 "$pgpass_file"
+  success "~/.pgpass written: ${pgpass_file} (role ${PG_ROLE}, owned by ${RUN_USER}, mode 600)"
 }
 
 enable_services() {
@@ -250,9 +300,13 @@ print_summary() {
   echo -e "    (remove this file once you've confirmed everything works:"
   echo -e "     sudo rm ${WEB_ROOT}/phptest.php)"
   echo
-  echo -e "  ${YELLOW}Next step:${NC} run 'bash setup/deploy_web.sh' to copy web/ into"
-  echo -e "  ${WEB_ROOT}, then make sure www-data's ~/.pgpass has a line for web_reader"
-  echo -e "  (see the warning above, or rpi5/README.md)."
+  if [[ -n "${WEB_READER_PASSWORD:-}" ]]; then
+    echo -e "  ${CYAN}~/.pgpass:${NC}          configured for '${PG_ROLE}' on ${PG_HOST}:${PG_PORT}/${PG_DBNAME}"
+  else
+    echo -e "  ${YELLOW}~/.pgpass:${NC}          NOT configured — see the warning above"
+  fi
+  echo
+  echo -e "  ${YELLOW}Next step:${NC} run 'bash setup/deploy_web.sh' to copy web/ into ${WEB_ROOT}."
   echo
 }
 
@@ -260,6 +314,8 @@ print_summary() {
 main() {
   banner
   check_root
+  prompt_for_password
+
   check_disk_space
   check_internet
 
@@ -273,7 +329,7 @@ main() {
   test_nginx_config
   enable_services
 
-  check_pgpass
+  setup_pgpass
   write_test_page
   run_smoke_test
 

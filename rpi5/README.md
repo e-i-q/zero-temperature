@@ -40,14 +40,27 @@ bash setup/deploy_web.sh             # copy web/ into the nginx web root
 The dashboard connects as the `web_reader` role (read-only grants on
 `sensors` and `readings` — see `../../db/database/sensors/meta.md`). Like
 `rpi-zero/python/dht22_logger.py`'s writer role, no password is stored in
-code or read from the environment: `www-data` needs a `~/.pgpass` entry:
+code or read from the environment — `setup_nginx_php.sh` prompts for
+`web_reader`'s password near the start of the run (this is the same
+password set via `WEB_READER_PASSWORD` when the role was created by the
+`db` project's `setup_db.py`) and writes it to `www-data`'s `~/.pgpass`
+for you, `chmod 600`. Set `WEB_READER_PASSWORD` in the environment
+beforehand to skip the prompt (e.g. for unattended installs).
+
+If you ever need to redo this by hand — a different host is running the
+dashboard, `www-data`'s home directory isn't where the script expects, or
+the password rotated outside of a re-run — the line the script writes is:
 
 ```
 127.0.0.1:5432:sensors:web_reader:<password>
 ```
 
 ```bash
-sudo -u www-data bash -c 'echo "127.0.0.1:5432:sensors:web_reader:<password>" >> ~/.pgpass && chmod 600 ~/.pgpass'
+# NOTE: `sudo echo ... > file` doesn't work — the redirect runs as your
+# own user, before sudo applies, so it hits Permission denied. Use tee:
+echo "127.0.0.1:5432:sensors:web_reader:<password>" | sudo tee "$(getent passwd www-data | cut -d: -f6)/.pgpass" > /dev/null
+sudo chown www-data:www-data "$(getent passwd www-data | cut -d: -f6)/.pgpass"
+sudo chmod 600 "$(getent passwd www-data | cut -d: -f6)/.pgpass"
 ```
 
 After setup, the dashboard is served at `http://<pi5-address>/`.
