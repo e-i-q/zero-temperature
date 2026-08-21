@@ -136,7 +136,7 @@
     renderLegend();
     renderTiles();
     drawChart('chart-temp', 'temperature_c', '°C', 220);
-    drawChart('chart-hum', 'humidity_pct', '%', 160);
+    drawChart('chart-hum', 'humidity_pct', '%', 220);
     drawLongChart();
     drawTable();
 
@@ -162,7 +162,7 @@
         if (hidden.has(s.id)) hidden.delete(s.id); else hidden.add(s.id);
         renderLegend();
         drawChart('chart-temp', 'temperature_c', '°C', 220);
-        drawChart('chart-hum', 'humidity_pct', '%', 160);
+        drawChart('chart-hum', 'humidity_pct', '%', 220);
         drawLongChart();
       });
       box.appendChild(item);
@@ -330,10 +330,18 @@
     if (tMax === tMin) tMax = tMin + 3600000;
 
     const isTemp = valueKey === 'temperature_c';
-    const vPad = isTemp ? 1 : 5;
-    vMin = isTemp ? Math.floor(vMin - vPad) : Math.max(0, Math.floor(vMin - vPad));
-    vMax = isTemp ? Math.ceil(vMax + vPad) : Math.min(100, Math.ceil(vMax + vPad));
-    if (vMax === vMin) vMax = vMin + 1;
+    if (isTemp) {
+      const vPad = 1;
+      vMin = Math.floor(vMin - vPad);
+      vMax = Math.ceil(vMax + vPad);
+      if (vMax === vMin) vMax = vMin + 1;
+    } else {
+      // Humidity is always plotted over its full physical range, not
+      // autoscaled to the data — 50% shouldn't look identical to a
+      // wobble between 48-52%.
+      vMin = 0;
+      vMax = 100;
+    }
 
     const x = (t) => marginLeft + ((t - tMin) / (tMax - tMin || 1)) * plotW;
     const y = (v) => marginTop + plotH - ((v - vMin) / (vMax - vMin || 1)) * plotH;
