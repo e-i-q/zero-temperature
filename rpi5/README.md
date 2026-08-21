@@ -26,6 +26,7 @@ PostgreSQL (Hive, this Pi)  →  api/readings.php, api/daily.php  →  dashboard
 | `web/api/daily.php` | JSON API: 12 months of daily mean/min/max temperature per sensor, aggregated in PostgreSQL |
 | `setup/setup_nginx_php.sh` | Installs and configures nginx + PHP-FPM (with `pdo_pgsql`) |
 | `setup/deploy_web.sh` | Syncs `web/` into the nginx web root |
+| `setup/lib/log.sh` | Shared colored logging + quiet-by-default install output for the scripts above |
 
 ## Setup (Raspberry Pi 5)
 
@@ -35,6 +36,14 @@ this Pi. Then, from this directory:
 ```bash
 sudo bash setup/setup_nginx_php.sh   # nginx + PHP-FPM + pdo_pgsql
 bash setup/deploy_web.sh             # copy web/ into the nginx web root
+```
+
+By default, package installs (`apt-get`, etc.) run quietly — you just see
+which package is being installed, not its raw output. Pass `-v`/`--verbose`
+to see the full output instead:
+
+```bash
+sudo bash setup/setup_nginx_php.sh --verbose
 ```
 
 The dashboard connects as the `web_reader` role (read-only grants on

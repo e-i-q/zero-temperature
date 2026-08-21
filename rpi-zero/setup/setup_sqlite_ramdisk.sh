@@ -20,19 +20,16 @@
 #   - DB lives in RAM — capped by RAMDISK_SIZE, monitor it           ⚠
 #
 # USAGE:
-#   sudo bash sqlite_ramdisk_setup.sh
+#   sudo bash sqlite_ramdisk_setup.sh [-v|--verbose]
+#
+#   -v, --verbose   Show full output from package installs (apt-get, etc.)
+#                   instead of just a one-line progress message.
 # =============================================================================
 
 set -euo pipefail
 
-# ── Colours ──────────────────────────────────────────────────────────────────
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-CYAN='\033[0;36m'; NC='\033[0m'
-
-info()    { echo -e "${CYAN}[INFO]${NC}  $*"; }
-success() { echo -e "${GREEN}[OK]${NC}    $*"; }
-warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-error()   { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/log.sh"
 
 # ── Config (override via env vars before running) ─────────────────────────────
 RAMDISK_SIZE="${RAMDISK_SIZE:-20m}"                       # RAM disk cap
@@ -98,8 +95,8 @@ check_free_ram() {
 # ── Install ────────────────────────────────────────────────────────────────────
 install_sqlite() {
   info "Installing sqlite3…"
-  apt-get update -qq
-  apt-get install -y sqlite3
+  run_quiet apt-get update
+  run_quiet apt-get install -y sqlite3
   success "sqlite3 installed: $(sqlite3 --version)"
 }
 

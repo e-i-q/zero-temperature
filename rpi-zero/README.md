@@ -27,6 +27,7 @@ best-effort, to the central database — see the `Remote DB` section of
 | `setup/setup_nginx_php.sh` | Installs and configures nginx + PHP-FPM (with `pdo_sqlite`) |
 | `setup/setup_dht22_logger.sh` | Installs Python deps and a cron job that runs the logger periodically |
 | `setup/deploy_web.sh` | Syncs `web/` into the nginx web root |
+| `setup/lib/log.sh` | Shared colored logging + quiet-by-default install output for the scripts above |
 
 ## Hardware
 
@@ -48,6 +49,14 @@ sudo bash setup/setup_dht22_logger.sh     # installs deps + cron job for the log
 Each script is configurable via environment variables (e.g. `RUN_USER`,
 `DB_PATH`, `WEB_ROOT`, `CRON_INTERVAL_MIN`) — see the top of each script for
 the available overrides.
+
+By default, package installs (`apt-get`, `pip3`, etc.) run quietly — you
+just see which package is being installed, not its raw output. Pass
+`-v`/`--verbose` to any setup script to see the full output instead:
+
+```bash
+sudo bash setup/setup_nginx_php.sh --verbose
+```
 
 After setup, the dashboard is served at `http://<pi-address>/`.
 

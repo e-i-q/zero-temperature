@@ -14,11 +14,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/log.sh"
 SRC_DIR="$(cd "${SCRIPT_DIR}/../web" && pwd)"
 
 WEB_ROOT="${WEB_ROOT:-/var/www/html}"
 RUN_USER="${RUN_USER:-www-data}"
 
+info "Deploying ${SRC_DIR} to ${WEB_ROOT}…"
 sudo mkdir -p "$WEB_ROOT"
 
 # -a preserves the api/css/js subdirectories; trailing slashes copy contents
@@ -27,4 +29,4 @@ sudo cp -a "${SRC_DIR}/." "${WEB_ROOT}/"
 
 sudo chown -R "${RUN_USER}:${RUN_USER}" "$WEB_ROOT"
 
-echo "Deployed ${SRC_DIR} -> ${WEB_ROOT} (owned by ${RUN_USER})"
+success "Deployed ${SRC_DIR} -> ${WEB_ROOT} (owned by ${RUN_USER})"

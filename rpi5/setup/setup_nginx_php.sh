@@ -13,19 +13,16 @@
 # that serves rpi5/web/ on top of it.
 #
 # USAGE:
-#   sudo bash setup/setup_nginx_php.sh
+#   sudo bash setup/setup_nginx_php.sh [-v|--verbose]
+#
+#   -v, --verbose   Show full output from package installs (apt-get, etc.)
+#                   instead of just a one-line progress message.
 # =============================================================================
 
 set -euo pipefail
 
-# -- Colours ------------------------------------------------------------------
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-CYAN='\033[0;36m'; NC='\033[0m'
-
-info()    { echo -e "${CYAN}[INFO]${NC}  $*"; }
-success() { echo -e "${GREEN}[OK]${NC}    $*"; }
-warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-error()   { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/log.sh"
 
 # -- Config --------------------------------------------------------------------
 WEB_ROOT="${WEB_ROOT:-/var/www/html}"
@@ -93,19 +90,19 @@ check_internet() {
 # -- Installation --------------------------------------------------------------
 update_system() {
   info "Updating package lists…"
-  apt-get update -qq
+  run_quiet apt-get update
   success "Package lists updated"
 }
 
 install_nginx() {
   info "Installing nginx…"
-  apt-get install -y nginx
+  run_quiet apt-get install -y nginx
   success "nginx installed: $(nginx -v 2>&1)"
 }
 
 install_php() {
   info "Installing PHP-FPM and required extensions…"
-  apt-get install -y \
+  run_quiet apt-get install -y \
     php-fpm \
     php-pgsql \
     php-cli

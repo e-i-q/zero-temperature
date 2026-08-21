@@ -7,22 +7,18 @@
 # SQLite database without anyone having to start it by hand.
 #
 # USAGE:
-#   sudo bash setup/setup_dht22_logger.sh
+#   sudo bash setup/setup_dht22_logger.sh [-v|--verbose]
+#
+#   -v, --verbose   Show full output from package installs (apt-get, pip)
+#                   instead of just a one-line progress message.
 # =============================================================================
 
 set -euo pipefail
 
-# -- Colours ------------------------------------------------------------------
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-CYAN='\033[0;36m'; NC='\033[0m'
-
-info()    { echo -e "${CYAN}[INFO]${NC}  $*"; }
-success() { echo -e "${GREEN}[OK]${NC}    $*"; }
-warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-error()   { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/log.sh"
 
 # -- Config (override via env vars before running) ----------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOGGER_SCRIPT="${LOGGER_SCRIPT:-${SCRIPT_DIR}/../python/dht22_logger.py}"
 
 RUN_USER="${RUN_USER:-eiq}"                              # Must have GPIO + DB access
@@ -86,10 +82,10 @@ check_pgpass() {
 # -- Install --------------------------------------------------------------------
 install_python_deps() {
   info "Installing Python dependencies for the DHT22 logger…"
-  apt-get update -qq
-  apt-get install -y python3-pip libpq5
-  pip3 install --break-system-packages adafruit-circuitpython-dht
-  pip3 install --break-system-packages psycopg2-binary
+  run_quiet apt-get update
+  run_quiet apt-get install -y python3-pip libpq5
+  run_quiet pip3 install --break-system-packages adafruit-circuitpython-dht
+  run_quiet pip3 install --break-system-packages psycopg2-binary
   success "Python dependencies installed"
 }
 

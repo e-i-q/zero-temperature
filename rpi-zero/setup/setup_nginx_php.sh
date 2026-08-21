@@ -1,25 +1,22 @@
 #!/usr/bin/env bash
 # =============================================================================
-# nginx + PHP-FPM Installer — Raspberry Pi Zero (ARM 32-bit / armhf)
+# nginx + PHP-FPM Installer â€” Raspberry Pi Zero (ARM 32-bit / armhf)
 #
 # Installs nginx + PHP-FPM with SQLite3 (pdo_sqlite) support, and wires them
 # together so .php files under the web root are executed by PHP, not just
 # served as plain text.
 #
 # USAGE:
-#   sudo bash install_nginx_php.sh
+#   sudo bash install_nginx_php.sh [-v|--verbose]
+#
+#   -v, --verbose   Show full output from package installs (apt-get, etc.)
+#                   instead of just a one-line progress message.
 # =============================================================================
 
 set -euo pipefail
 
-# -- Colours ------------------------------------------------------------------
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-CYAN='\033[0;36m'; NC='\033[0m'
-
-info()    { echo -e "${CYAN}[INFO]${NC}  $*"; }
-success() { echo -e "${GREEN}[OK]${NC}    $*"; }
-warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-error()   { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/log.sh"
 
 # -- Config --------------------------------------------------------------------
 WEB_ROOT="${WEB_ROOT:-/var/www/html}"
@@ -30,7 +27,7 @@ RUN_USER="${RUN_USER:-www-data}"   # nginx/PHP-FPM run as this user
 banner() {
   echo -e "${CYAN}"
   echo "+------------------------------------------------------+"
-  echo "¦   nginx + PHP-FPM Installer — Raspberry Pi Zero     ¦"
+  echo "|   nginx + PHP-FPM Installer â€” Raspberry Pi Zero      |"
   echo "+------------------------------------------------------+"
   echo -e "${NC}"
 }
@@ -42,38 +39,38 @@ check_root() {
 
 check_disk_space() {
   AVAIL_MB=$(df /var --output=avail -BM | tail -1 | tr -d 'M')
-  (( AVAIL_MB >= 200 )) || error "Not enough disk space (${AVAIL_MB} MB free, need = 200 MB)."
-  info "Available disk space: ${AVAIL_MB} MB — OK"
+  (( AVAIL_MB >= 200 )) || error "Not enough disk space (${AVAIL_MB} MB free, need >= 200 MB)."
+  info "Available disk space: ${AVAIL_MB} MB â€” OK"
 }
 
 check_internet() {
-  info "Checking internet connectivity…"
+  info "Checking internet connectivityâ€¦"
   ping -c1 -W3 8.8.8.8 &>/dev/null || error "No internet connection detected. Please connect and retry."
   success "Internet OK"
 }
 
 detect_php_version() {
   # Find whatever PHP version is available in the distro repos (Debian/Raspbian
-  # ships one default version per release — e.g. PHP 8.2 on Bookworm)
+  # ships one default version per release â€” e.g. PHP 8.2 on Bookworm)
   apt-cache search '^php[0-9]\.[0-9]-fpm$' 2>/dev/null | head -1 | grep -oP 'php\K[0-9]\.[0-9]' || true
 }
 
 # -- Installation --------------------------------------------------------------
 update_system() {
-  info "Updating package lists…"
-  apt-get update -qq
+  info "Updating package listsâ€¦"
+  run_quiet apt-get update
   success "Package lists updated"
 }
 
 install_nginx() {
-  info "Installing nginx…"
-  apt-get install -y nginx
+  info "Installing nginxâ€¦"
+  run_quiet apt-get install -y nginx
   success "nginx installed: $(nginx -v 2>&1)"
 }
 
 install_php() {
-  info "Installing PHP-FPM and required extensions…"
-  apt-get install -y \
+  info "Installing PHP-FPM and required extensionsâ€¦"
+  run_quiet apt-get install -y \
     php-fpm \
     php-sqlite3 \
     php-cli
@@ -89,7 +86,7 @@ install_php() {
 }
 
 verify_sqlite_extension() {
-  info "Verifying SQLite3 PHP extension…"
+  info "Verifying SQLite3 PHP extensionâ€¦"
   if php -m | grep -qi sqlite3 && php -m | grep -qi pdo_sqlite; then
     success "sqlite3 and pdo_sqlite extensions confirmed active"
   else
@@ -98,7 +95,7 @@ verify_sqlite_extension() {
 }
 
 enable_services() {
-  info "Enabling and starting services…"
+  info "Enabling and starting servicesâ€¦"
   systemctl enable nginx
   systemctl enable "${PHP_FPM_SERVICE}"
   systemctl restart "${PHP_FPM_SERVICE}"
@@ -115,7 +112,7 @@ enable_services() {
 
 # -- nginx site config wiring PHP-FPM in ---------------------------------------
 configure_nginx_site() {
-  info "Configuring nginx site '${SITE_NAME}' to hand .php files to PHP-FPM…"
+  info "Configuring nginx site '${SITE_NAME}' to hand .php files to PHP-FPMâ€¦"
 
   CONF_PATH="/etc/nginx/sites-available/${SITE_NAME}"
 
@@ -172,15 +169,15 @@ EOF
 }
 
 test_nginx_config() {
-  info "Testing nginx configuration…"
-  nginx -t || error "nginx config test failed — check the output above"
+  info "Testing nginx configurationâ€¦"
+  nginx -t || error "nginx config test failed â€” check the output above"
   systemctl reload nginx
   success "nginx config valid and reloaded"
 }
 
 # -- Permissions for web root --------------------------------------------------
 setup_web_root() {
-  info "Setting up web root at ${WEB_ROOT}…"
+  info "Setting up web root at ${WEB_ROOT}â€¦"
   mkdir -p "$WEB_ROOT"
   chown -R "${RUN_USER}:${RUN_USER}" "$WEB_ROOT"
   success "Web root ready: ${WEB_ROOT} (owned by ${RUN_USER})"
@@ -188,7 +185,7 @@ setup_web_root() {
 
 # -- Sanity test: PHP + SQLite info page ---------------------------------------
 write_test_page() {
-  info "Writing a quick PHP+SQLite test page…"
+  info "Writing a quick PHP+SQLite test pageâ€¦"
   cat > "${WEB_ROOT}/phptest.php" << 'EOF'
 <?php
 header('Content-Type: text/plain');
@@ -211,7 +208,7 @@ EOF
 }
 
 run_smoke_test() {
-  info "Running smoke test against http://127.0.0.1/phptest.php…"
+  info "Running smoke test against http://127.0.0.1/phptest.phpâ€¦"
   sleep 1
   RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1/phptest.php || echo "000")
 
@@ -220,7 +217,7 @@ run_smoke_test() {
     info "Response body:"
     curl -s http://127.0.0.1/phptest.php | sed 's/^/    /'
   else
-    warn "Smoke test returned HTTP ${RESPONSE} — check nginx/php-fpm logs if this isn't expected"
+    warn "Smoke test returned HTTP ${RESPONSE} â€” check nginx/php-fpm logs if this isn't expected"
   fi
 }
 
@@ -228,7 +225,7 @@ run_smoke_test() {
 print_summary() {
   echo
   echo -e "${GREEN}--------------------------------------------------------${NC}"
-  echo -e "${GREEN}  nginx + PHP-FPM installed successfully! ??${NC}"
+  echo -e "${GREEN}  nginx + PHP-FPM installed successfully!${NC}"
   echo -e "${GREEN}--------------------------------------------------------${NC}"
   echo
   echo -e "  ${CYAN}PHP version:${NC}        ${PHP_VERSION}"
@@ -252,7 +249,7 @@ print_summary() {
   echo -e "    journalctl -u ${PHP_FPM_SERVICE}"
   echo
   echo -e "  ${YELLOW}Next step:${NC} write a PHP endpoint (e.g. readings.php) that opens"
-  echo -e "  your SQLite database with PDO and returns JSON for the dashboard —"
+  echo -e "  your SQLite database with PDO and returns JSON for the dashboard â€”"
   echo -e "  happy to write that for you on request."
   echo
 }
