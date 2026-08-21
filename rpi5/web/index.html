@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hive · Zero Temperature</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;700&family=Barlow+Condensed:wght@400;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="page">
+
+  <header class="topbar">
+    <div class="brand-row">
+      <span class="brand">Zero Temperature</span>
+      <nav class="tabs"><span class="tab active">Overview</span></nav>
+    </div>
+    <span class="status" id="status">Loading…</span>
+  </header>
+
+  <div class="controls">
+    <div class="range-chips" id="range-chips">
+      <button class="chip" data-range="12h">12H</button>
+      <button class="chip active" data-range="24h">24H</button>
+      <button class="chip" data-range="2d">2D</button>
+      <button class="chip" data-range="5d">5D</button>
+      <button class="chip" data-range="1m">1M</button>
+      <button class="chip" data-range="all">ALL</button>
+    </div>
+    <div class="legend" id="legend"></div>
+  </div>
+
+  <div class="tile-grid" id="tile-grid"></div>
+
+  <div class="empty-state" id="empty-state" hidden>
+    <strong>No readings yet</strong>
+    No sensor has written to the Hive database in this window. Check that at
+    least one RPi Zero logger is running and can reach this Pi 5.
+  </div>
+
+  <section class="chart-card" id="section-temp">
+    <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+    <div class="chart-head">
+      <span class="chart-title">Temperature</span>
+      <span class="chart-note">shaded bands = approx. night (20:00–06:00) · hover for a reading from every sensor</span>
+    </div>
+    <div class="chart-wrap"><svg id="chart-temp" viewBox="0 0 1000 220" preserveAspectRatio="none"></svg></div>
+  </section>
+
+  <section class="chart-card" id="section-hum">
+    <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+    <div class="chart-head">
+      <span class="chart-title">Relative humidity</span>
+      <span class="chart-note">same x-axis, linked crosshair</span>
+    </div>
+    <div class="chart-wrap"><svg id="chart-hum" viewBox="0 0 1000 160" preserveAspectRatio="none"></svg></div>
+  </section>
+
+  <section class="chart-card" id="section-long">
+    <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+    <div class="chart-head">
+      <span class="chart-title">Long term — last 12 months, daily mean</span>
+    </div>
+    <div class="chart-wrap"><svg id="chart-long" viewBox="0 0 1000 200" preserveAspectRatio="none"></svg></div>
+  </section>
+
+  <div class="section-label">Recent Readings</div>
+  <div class="table-wrap">
+    <table class="log-table" id="log-table">
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Sensor</th>
+          <th>Temp °C</th>
+          <th>Humidity %</th>
+          <th>Samples</th>
+        </tr>
+      </thead>
+      <tbody id="log-body"></tbody>
+    </table>
+  </div>
+
+  <footer>
+    <span id="footer-count">—</span>
+    <span id="footer-generated">—</span>
+  </footer>
+
+</div>
+
+<div class="tooltip" id="tooltip" hidden>
+  <div class="tooltip-head" id="tooltip-head"></div>
+  <div class="tooltip-rows" id="tooltip-rows"></div>
+</div>
+
+<script src="js/script.js"></script>
+</body>
+</html>

@@ -1,0 +1,339 @@
+/* Hive dashboard — styled after IoT Temperature Dashboard Wireframe (option
+   1a: tiles over stacked overlay charts). Light-only, matching the wireframe
+   — the design system it's drawn from ("Industry") ships one light theme. */
+
+:root {
+  /* -- Design-system tokens, carried over from the wireframe's
+        ds/styles.css ("Industry") -------------------------------------- */
+  --color-page: #e6e6e8;
+  --color-bg: #f2f2f3;
+  --color-surface: #e9e9ea;
+  --color-text: #1d1f20;
+  --color-text-soft: #5d5d60;
+  --color-text-muted: #7a7a7d;
+  --color-accent: #5980a6;
+  --color-accent-strong: #416180;
+  --color-divider: rgba(29, 31, 32, 0.16);
+  --color-divider-strong: rgba(29, 31, 32, 0.32);
+
+  --font-heading: 'Barlow Condensed', system-ui, sans-serif;
+  --font-body: 'Barlow', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'SF Mono', Consolas, monospace;
+
+  /* -- Categorical series colors — the dataviz skill's validated 8-hue
+        default order (fixed order, never cycled/reassigned per filter).
+        Assigned to sensors in registry order (sorted by name) in
+        script.js's colorFor(). ------------------------------------------- */
+  --series-1: #2a78d6; /* blue */
+  --series-2: #eb6834; /* orange */
+  --series-3: #1baf7a; /* aqua */
+  --series-4: #eda100; /* yellow */
+  --series-5: #e87ba4; /* magenta */
+  --series-6: #008300; /* green */
+  --series-7: #4a3aa7; /* violet */
+  --series-8: #e34948; /* red */
+  --series-offline: var(--color-text-muted);
+
+  --status-good-bg: #eaf5ea;
+  --status-good-text: #0ca30c;
+  --status-offline-bg: rgba(29, 31, 32, 0.06);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--color-page);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 32px 24px 72px;
+}
+
+h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
+
+/* -- Blueprint card: hairline border, square corners, small registration
+      ticks at each corner — the wireframe's signature container. --------- */
+.blueprint-corners { position: relative; }
+.blueprint-corners::before,
+.blueprint-corners::after,
+.blueprint-corners .corner-bl,
+.blueprint-corners .corner-br { display: none; } /* placeholder, ticks below */
+
+.card, .chart-card, .tile {
+  position: relative;
+  border: 1px solid var(--color-divider);
+  background: var(--color-bg);
+}
+.card .corner, .chart-card .corner, .tile .corner {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  color: var(--color-divider-strong);
+}
+.card .corner::before, .chart-card .corner::before, .tile .corner::before,
+.card .corner::after, .chart-card .corner::after, .tile .corner::after {
+  content: '';
+  position: absolute;
+  background: currentColor;
+}
+.corner::before { left: 4px; top: 0; width: 1px; height: 100%; }
+.corner::after { top: 4px; left: 0; width: 100%; height: 1px; }
+.corner.tl { top: -5px; left: -5px; }
+.corner.tr { top: -5px; right: -5px; }
+.corner.bl { bottom: -5px; left: -5px; }
+.corner.br { bottom: -5px; right: -5px; }
+
+/* -- Topbar --------------------------------------------------------------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--color-divider);
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.brand-row { display: flex; align-items: baseline; gap: 24px; flex-wrap: wrap; }
+
+.brand {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 20px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.tabs { display: flex; gap: 20px; }
+.tab {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  padding-bottom: 2px;
+}
+.tab.active { color: var(--color-text); border-bottom: 2px solid var(--color-accent); }
+
+.status { font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted); }
+
+/* -- Controls row: range chips + legend ------------------------------------ */
+.controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.range-chips { display: flex; border: 1px solid var(--color-divider-strong); }
+.chip {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  border-left: 1px solid var(--color-divider-strong);
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.chip:first-child { border-left: none; }
+.chip:hover { color: var(--color-text); }
+.chip.active { background: var(--color-accent); color: var(--color-bg); }
+
+.legend { display: flex; gap: 14px; flex-wrap: wrap; }
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--color-text-soft);
+  background: none;
+  border: none;
+  padding: 0;
+}
+.legend-item.dim { opacity: 0.35; }
+.legend-swatch { width: 13px; height: 2px; flex: none; }
+
+/* -- Sensor tiles ----------------------------------------------------------- */
+.tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.tile { padding: 12px 14px; }
+.tile.offline { opacity: 0.55; }
+
+.tile-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.tile-name {
+  font: 400 9.5px var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tile-badge {
+  font: 400 9px var(--font-mono);
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border: 1px solid var(--status-good-text);
+  color: var(--status-good-text);
+  flex: none;
+}
+.tile.offline .tile-badge { border-color: var(--color-divider-strong); color: var(--color-text-muted); }
+
+.tile-value {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  margin-top: 6px;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 28px;
+  line-height: 1;
+}
+.tile-value .unit { font-family: var(--font-mono); font-weight: 400; font-size: 11px; color: var(--color-text-muted); }
+.tile-humidity { font: 400 11px var(--font-mono); color: var(--color-text-muted); margin-top: 2px; }
+
+.tile-spark { width: 100%; height: 24px; display: block; margin-top: 8px; }
+
+.tile-stats, .tile-meta {
+  font: 400 9.5px var(--font-mono);
+  color: var(--color-text-muted);
+  margin-top: 6px;
+}
+
+/* -- Chart cards ------------------------------------------------------------ */
+.chart-card { padding: 14px 16px; margin-bottom: 16px; }
+
+.chart-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.chart-title {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.chart-note { font: 400 10px var(--font-mono); color: var(--color-text-muted); }
+
+.chart-wrap { margin-top: 10px; position: relative; }
+.chart-wrap svg { width: 100%; height: auto; display: block; cursor: crosshair; }
+
+svg text { font-family: var(--font-mono); fill: var(--color-text-muted); }
+
+/* -- Tooltip / crosshair ----------------------------------------------------- */
+.tooltip {
+  position: fixed;
+  pointer-events: none;
+  z-index: 20;
+  background: var(--color-text);
+  color: var(--color-bg);
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  min-width: 140px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+.tooltip-head { font-weight: 600; margin-bottom: 4px; color: #fff; }
+.tooltip-row { display: flex; align-items: center; gap: 6px; padding: 1px 0; white-space: nowrap; }
+.tooltip-key { width: 11px; height: 2px; flex: none; }
+.tooltip-name { color: color-mix(in srgb, var(--color-bg) 70%, transparent); flex: 1; }
+.tooltip-val { font-weight: 600; color: #fff; }
+
+/* -- Empty state ------------------------------------------------------------- */
+.empty-state {
+  text-align: center;
+  padding: 56px 24px;
+  color: var(--color-text-muted);
+  border: 1px dashed var(--color-divider-strong);
+  margin-bottom: 24px;
+}
+.empty-state strong {
+  display: block;
+  color: var(--color-text);
+  font-family: var(--font-heading);
+  font-size: 17px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+/* -- Recent readings table ---------------------------------------------------- */
+.section-label {
+  font: 400 11px var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-bottom: 12px;
+}
+
+.table-wrap { overflow-x: auto; }
+
+.log-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 480px; }
+.log-table thead th {
+  text-align: left;
+  font: 400 10.5px var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--color-divider-strong);
+}
+.log-table thead th:not(:first-child):not(:nth-child(2)),
+.log-table tbody td:not(:first-child):not(:nth-child(2)) { text-align: right; }
+.log-table tbody td { padding: 6px 10px; border-bottom: 1px solid var(--color-divider); }
+.log-table tbody tr:hover { background: var(--color-surface); }
+.log-table .swatch-cell { display: flex; align-items: center; gap: 6px; }
+.log-table .swatch-cell .legend-swatch { width: 10px; }
+
+/* -- Footer -------------------------------------------------------------------- */
+footer {
+  margin-top: 32px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-divider);
+  font: 400 10.5px var(--font-mono);
+  color: var(--color-text-muted);
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .tile-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  .brand { font-size: 17px; }
+  .page { padding: 24px 14px 56px; }
+  .log-table thead th:nth-child(5), .log-table tbody td:nth-child(5) { display: none; }
+}
