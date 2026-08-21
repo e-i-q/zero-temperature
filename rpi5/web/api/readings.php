@@ -6,7 +6,7 @@
  * centralizing the data).
  *
  * Query params (all optional):
- *   ?range=24h   One of RANGE_INTERVALS below, or "all". Default 24h.
+ *   ?range=24h   One of RANGE_MODIFIERS below, or "all". Default 24h.
  */
 
 declare(strict_types=1);
@@ -17,12 +17,19 @@ header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, no-cache, must-revalidate');
 
 // -- Configuration ----------------------------------------------------------
-const RANGE_INTERVALS = [
-    '12h' => '12 hours',
-    '24h' => '24 hours',
-    '2d'  => '2 days',
-    '5d'  => '5 days',
-    '1m'  => '1 month',
+// PHP relative-date modifiers (DateTime::modify), not SQL — the cutoff is
+// computed here and bound as a plain timestamp, rather than asking
+// PostgreSQL to parse an interval string. That sidesteps a real PDO_PGSQL
+// gotcha: a `::type` cast placed directly after a bound `:placeholder`
+// (e.g. `:window::interval`) confuses PDO's own placeholder parser and
+// throws a "syntax error" PDOException before the query ever reaches
+// PostgreSQL — see https://bugs.php.net/bug.php?id=80863 and friends.
+const RANGE_MODIFIERS = [
+    '12h' => '-12 hours',
+    '24h' => '-24 hours',
+    '2d'  => '-2 days',
+    '5d'  => '-5 days',
+    '1m'  => '-1 month',
 ];
 const DEFAULT_RANGE = '24h';
 
@@ -38,7 +45,7 @@ const MAX_ROWS = 20000;
 
 // -- Parse + validate query params ------------------------------------------
 $range = (string) ($_GET['range'] ?? DEFAULT_RANGE);
-if ($range !== 'all' && !array_key_exists($range, RANGE_INTERVALS)) {
+if ($range !== 'all' && !array_key_exists($range, RANGE_MODIFIERS)) {
     $range = DEFAULT_RANGE;
 }
 
@@ -56,14 +63,18 @@ try {
 // -- Readings -----------------------------------------------------------------
 $sql = 'SELECT sensor_id, recorded_at, temperature_c, humidity_pct, sample_count FROM readings';
 if ($range !== 'all') {
-    $sql .= ' WHERE recorded_at >= now() - :window::interval';
+    $sql .= ' WHERE recorded_at >= :since';
 }
 $sql .= ' ORDER BY recorded_at ASC LIMIT :limit';
 
 try {
     $stmt = $pdo->prepare($sql);
     if ($range !== 'all') {
-        $stmt->bindValue(':window', RANGE_INTERVALS[$range], PDO::PARAM_STR);
+        // recorded_at is UTC wall-clock (no tz) — compute the cutoff in UTC
+        // too, so this doesn't drift with the web server's local time zone.
+        $since = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+        $since = $since->modify(RANGE_MODIFIERS[$range]);
+        $stmt->bindValue(':since', $since->format('Y-m-d H:i:s'), PDO::PARAM_STR);
     }
     $stmt->bindValue(':limit', MAX_ROWS, PDO::PARAM_INT);
     $stmt->execute();
@@ -85,7 +96,7 @@ foreach ($rows as $row) {
         continue; // reading references a sensor_id no longer in the registry
     }
     $point = [
-        'recorded_at'   => $row['recorded_at'],
+        'recorded_at'   => toIsoUtc($row['recorded_at']),
         'temperature_c' => round((float) $row['temperature_c'], 2),
         'humidity_pct'  => round((float) $row['humidity_pct'], 2),
         'sample_count'  => (int) $row['sample_count'],

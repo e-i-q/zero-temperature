@@ -31,11 +31,16 @@ try {
                 min(temperature_c) AS temp_min,
                 max(temperature_c) AS temp_max
          FROM readings
-         WHERE recorded_at >= now() - make_interval(months => :months)
+         WHERE recorded_at >= :since
          GROUP BY sensor_id, day
          ORDER BY day ASC"
     );
-    $stmt->bindValue(':months', MONTHS_BACK, PDO::PARAM_INT);
+    // Computed in PHP (UTC, matching recorded_at's storage convention) and
+    // bound as a plain timestamp — see readings.php's RANGE_MODIFIERS
+    // comment for why this avoids asking PostgreSQL to parse an interval.
+    $since = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+    $since = $since->modify('-' . MONTHS_BACK . ' months');
+    $stmt->bindValue(':since', $since->format('Y-m-d H:i:s'), PDO::PARAM_STR);
     $stmt->execute();
     $rows = $stmt->fetchAll();
 } catch (PDOException $e) {

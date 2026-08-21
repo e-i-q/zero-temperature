@@ -73,13 +73,26 @@
   }
 
   // -- Fetch ------------------------------------------------------------------
+  // api/*.php always answers with JSON, even on failure (db.php's fail()
+  // emits {"error": "..."}), so surface that message instead of a bare
+  // status code — it's the difference between "HTTP 500" and knowing why.
+  async function fetchJson(url) {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) {
+      let detail = 'HTTP ' + res.status;
+      try {
+        const body = await res.json();
+        if (body && body.error) detail = body.error;
+      } catch { /* body wasn't JSON — stick with the status code */ }
+      throw new Error(detail);
+    }
+    return res.json();
+  }
+
   async function loadReadings() {
     nextFetchAt = Date.now() + REFRESH_MS;
     try {
-      const url = `${READINGS_URL}?range=${encodeURIComponent(currentRange)}`;
-      const res = await fetch(url, { cache: 'no-store' });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const payload = await res.json();
+      const payload = await fetchJson(`${READINGS_URL}?range=${encodeURIComponent(currentRange)}`);
       sensors = payload.sensors || [];
       series = payload.series || {};
       hidden = new Set([...hidden].filter((id) => sensors.some((s) => s.id === id)));
@@ -88,19 +101,17 @@
     } catch (err) {
       statusLabel = 'Unable to reach the Hive';
       renderStatus();
-      console.error('Failed to load readings:', err);
+      console.error('Failed to load readings:', err.message);
     }
   }
 
   async function loadDaily() {
     try {
-      const res = await fetch(DAILY_URL, { cache: 'no-store' });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const payload = await res.json();
+      const payload = await fetchJson(DAILY_URL);
       dailySeries = payload.series || {};
       drawLongChart();
     } catch (err) {
-      console.error('Failed to load 12-month history:', err);
+      console.error('Failed to load 12-month history:', err.message);
     }
   }
 

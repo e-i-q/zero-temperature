@@ -26,6 +26,18 @@ function fail(int $httpCode, string $message): never {
     exit;
 }
 
+// PostgreSQL TIMESTAMP columns (no time zone) come back from PDO as bare
+// "YYYY-MM-DD HH:MM:SS" strings — no offset, no 'Z'. Every recorded_at in
+// this schema is a UTC wall-clock value (see
+// rpi-zero/python/dht22_logger.py's timestamp = datetime.now(timezone.utc)...),
+// but a browser parsing that bare string via `new Date(...)` treats it as
+// LOCAL time, not UTC. Stamp it unambiguous ISO-8601 before it ever reaches
+// the client, so charts/tables/"last seen" all land on the real instant
+// regardless of the viewer's time zone.
+function toIsoUtc(string $pgTimestamp): string {
+    return str_replace(' ', 'T', $pgTimestamp) . 'Z';
+}
+
 function db(): PDO {
     static $pdo = null;
     if ($pdo !== null) {
