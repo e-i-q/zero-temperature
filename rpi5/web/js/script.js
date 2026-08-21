@@ -139,9 +139,91 @@
     drawChart('chart-hum', 'humidity_pct', '%', 220);
     drawLongChart();
     drawTable();
+    updateFavicon();
 
     el('footer-count').textContent = payload.count + ' reading' + (payload.count === 1 ? '' : 's') + ' in window';
     el('footer-generated').textContent = 'Queried ' + fmtTime(payload.generated_at);
+  }
+
+  // -- Favicon — recolors itself at the extremes, same thresholds as the
+  //    per-Zero dashboard, but driven off the average of all sensors' latest
+  //    readings (and their average trend) since the Hive has more than one). --
+  const TREND_SAMPLE_COUNT = 5;
+  const TREND_FLAT_THRESHOLD_C = 0.2;
+  const FAVICON_HOT_THRESHOLD_C = 25;
+  const FAVICON_COLD_THRESHOLD_C = 20;
+  const FAVICON_HOT_COLOR = '#e54848';
+  const FAVICON_COLD_COLOR = '#4c8df6';
+  const faviconTintCache = new Map();
+
+  function avgLatestTemp() {
+    const temps = sensors.filter((s) => s.latest).map((s) => s.latest.temperature_c);
+    if (!temps.length) return null;
+    return temps.reduce((a, b) => a + b, 0) / temps.length;
+  }
+
+  // Averages each sensor's own recent trend rather than diffing the average
+  // series, so a sensor that drops out mid-window doesn't skew the read.
+  function getAvgTempTrend() {
+    const diffs = [];
+    for (const s of sensors) {
+      const pts = series[s.id];
+      if (!pts || pts.length < 2) continue;
+      const n = Math.min(TREND_SAMPLE_COUNT, pts.length);
+      const recent = pts.slice(-n);
+      diffs.push(recent[recent.length - 1].temperature_c - recent[0].temperature_c);
+    }
+    if (!diffs.length) return null;
+    const diff = diffs.reduce((a, b) => a + b, 0) / diffs.length;
+    let direction = 'flat';
+    if (diff > TREND_FLAT_THRESHOLD_C) direction = 'up';
+    else if (diff < -TREND_FLAT_THRESHOLD_C) direction = 'down';
+    return { direction, diff };
+  }
+
+  function tempIconColor(tempC) {
+    if (typeof tempC !== 'number') return null;
+    if (tempC > FAVICON_HOT_THRESHOLD_C) return FAVICON_HOT_COLOR;
+    if (tempC < FAVICON_COLD_THRESHOLD_C) return FAVICON_COLD_COLOR;
+    return null; // within the normal range - keep the icon's original color
+  }
+
+  // Recolors a favicon PNG via canvas ('source-in' keeps the icon's alpha
+  // shape, replacing only its visible pixels with the given color) since
+  // PNGs can't be recolored with CSS the way an inline SVG could.
+  function setFaviconTinted(src, color) {
+    const cacheKey = src + '|' + color;
+    const cached = faviconTintCache.get(cacheKey);
+    if (cached) {
+      el('favicon').setAttribute('href', cached);
+      return;
+    }
+    if (!color) {
+      el('favicon').setAttribute('href', src);
+      return;
+    }
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      ctx.globalCompositeOperation = 'source-in';
+      ctx.fillStyle = color;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL('image/png');
+      faviconTintCache.set(cacheKey, dataUrl);
+      el('favicon').setAttribute('href', dataUrl);
+    };
+    img.src = src;
+  }
+
+  function updateFavicon() {
+    const trend = getAvgTempTrend();
+    const icons = { up: 'thermometer-up-48.png', down: 'thermometer-down-48.png', flat: 'thermometer-48.png' };
+    const direction = trend ? trend.direction : 'flat';
+    setFaviconTinted('icon/' + icons[direction], tempIconColor(avgLatestTemp()));
   }
 
   // -- Legend — click to toggle a sensor's series in both charts ---------------
