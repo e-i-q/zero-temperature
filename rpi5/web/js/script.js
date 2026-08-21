@@ -6,10 +6,12 @@
   const FORECAST_REFRESH_MS = REFRESH_MS * 5; // forecast.php itself caches Open-Meteo for 30min
   const RANGE_STORAGE_KEY = 'hiveRange';
   const FORECAST_RANGE_STORAGE_KEY = 'hiveForecastRange';
-  // Mirrors api/forecast.php's RANGE_HOURS — used client-side only to decide
-  // whether to show the "clamped to Open-Meteo's max" note; the server does
-  // the actual clamping.
-  const FORECAST_RANGE_HOURS = { '12h': 12, '24h': 24, '2d': 48, '5d': 120, '1m': 16 * 24, all: 16 * 24 };
+  // Each chip's *literal* meaning (matching readings.php's RANGE_MODIFIERS),
+  // used client-side only to decide whether to show the "clamped to
+  // Open-Meteo's max" note — deliberately NOT pre-clamped, or the note could
+  // never fire for the one/two ranges it exists to explain. The server does
+  // the actual clamping (api/forecast.php's RANGE_HOURS).
+  const FORECAST_RANGE_HOURS = { '12h': 12, '24h': 24, '2d': 48, '5d': 120, '1m': 30 * 24, all: Infinity };
   const MAX_CHART_POINTS = 1500; // per-sensor downsample cap for the two timeline charts
   const GRID_COLOR = '#1d1f20'; // --color-text, used for hairline gridlines/night bands
 
