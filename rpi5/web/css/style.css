@@ -218,6 +218,15 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
   line-height: 1;
 }
 .tile-value .unit { font-family: var(--font-mono); font-weight: 400; font-size: 11px; color: var(--color-text-muted); }
+
+.trend-badge {
+  font: 400 11px var(--font-mono);
+  margin-left: 2px;
+}
+.trend-badge.trend-up { color: var(--series-8); }
+.trend-badge.trend-down { color: var(--series-1); }
+.trend-badge.trend-flat { color: var(--color-text-muted); }
+
 .tile-humidity { font: 400 11px var(--font-mono); color: var(--color-text-muted); margin-top: 2px; }
 
 .tile-spark { width: 100%; height: 24px; display: block; margin-top: 8px; }

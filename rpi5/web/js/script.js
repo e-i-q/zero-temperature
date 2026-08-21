@@ -162,19 +162,28 @@
     return temps.reduce((a, b) => a + b, 0) / temps.length;
   }
 
+  // Compares a single sensor's last few readings to gauge whether its
+  // temperature is trending up, down, or flat. Drives both the per-tile
+  // delta badge and (averaged across sensors) the favicon.
+  function getSensorTempTrend(sensorId) {
+    const pts = series[sensorId];
+    if (!pts) return null;
+    const n = Math.min(TREND_SAMPLE_COUNT, pts.length);
+    if (n < 2) return null;
+    const recent = pts.slice(-n);
+    const diff = recent[recent.length - 1].temperature_c - recent[0].temperature_c;
+    let direction = 'flat';
+    if (diff > TREND_FLAT_THRESHOLD_C) direction = 'up';
+    else if (diff < -TREND_FLAT_THRESHOLD_C) direction = 'down';
+    return { direction, diff };
+  }
+
   // Averages each sensor's own recent trend rather than diffing the average
   // series, so a sensor that drops out mid-window doesn't skew the read.
   function getAvgTempTrend() {
-    const diffs = [];
-    for (const s of sensors) {
-      const pts = series[s.id];
-      if (!pts || pts.length < 2) continue;
-      const n = Math.min(TREND_SAMPLE_COUNT, pts.length);
-      const recent = pts.slice(-n);
-      diffs.push(recent[recent.length - 1].temperature_c - recent[0].temperature_c);
-    }
-    if (!diffs.length) return null;
-    const diff = diffs.reduce((a, b) => a + b, 0) / diffs.length;
+    const trends = sensors.map((s) => getSensorTempTrend(s.id)).filter(Boolean);
+    if (!trends.length) return null;
+    const diff = trends.reduce((a, t) => a + t.diff, 0) / trends.length;
     let direction = 'flat';
     if (diff > TREND_FLAT_THRESHOLD_C) direction = 'up';
     else if (diff < -TREND_FLAT_THRESHOLD_C) direction = 'down';
@@ -279,6 +288,14 @@
         unit.className = 'unit';
         unit.textContent = '°C';
         value.append(num, unit);
+        const trend = getSensorTempTrend(s.id);
+        if (trend) {
+          const arrows = { up: '▲', down: '▼', flat: '▬' };
+          const trendBadge = document.createElement('span');
+          trendBadge.className = 'trend-badge trend-' + trend.direction;
+          trendBadge.textContent = `${arrows[trend.direction]} ${Math.abs(trend.diff).toFixed(1)}°`;
+          value.appendChild(trendBadge);
+        }
       } else {
         value.textContent = '—';
       }
