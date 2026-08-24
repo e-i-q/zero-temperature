@@ -1,6 +1,8 @@
 /* Hive dashboard — styled after IoT Temperature Dashboard Wireframe (option
-   1a: tiles over stacked overlay charts). Light-only, matching the wireframe
-   — the design system it's drawn from ("Industry") ships one light theme. */
+   1a: tiles over stacked overlay charts). Light by default, with a dark
+   theme (data-theme="dark" on <html>, toggled top-right, remembered in
+   localStorage — see js/script.js) built from a fixed 7-step grayscale
+   ramp: #eeeeef #c6c6c9 #9f9fa4 #7a7a81 #57575f #36363c #18181c. */
 
 :root {
   /* -- Design-system tokens, carried over from the wireframe's
@@ -15,6 +17,10 @@
   --color-accent-strong: #416180;
   --color-divider: rgba(29, 31, 32, 0.16);
   --color-divider-strong: rgba(29, 31, 32, 0.32);
+  /* text color to use on top of --color-accent (chip.active etc.) — stays
+     the same light tone in both themes since the accent blue doesn't
+     change, so it never needs a dark-theme override. */
+  --color-on-accent: #f2f2f3;
 
   --font-heading: 'Barlow Condensed', system-ui, sans-serif;
   --font-body: 'Barlow', system-ui, sans-serif;
@@ -45,6 +51,23 @@
   --temp: #c1502e;
   --humidity: #3a5a78;
   --wind: #4c8a5e;
+}
+
+/* -- Dark theme — same token set, remapped onto the grayscale ramp above.
+      Guarded with :not([data-theme="light"]) so a bare system dark-mode
+      preference doesn't apply here: the toggle is the only thing that sets
+      data-theme, so this block only ever matches [data-theme="dark"]. Kept
+      as an attribute selector (not prefers-color-scheme) because the
+      switch is opt-in and localStorage-backed, not OS-driven. ------------ */
+:root[data-theme="dark"] {
+  --color-page: #18181c;
+  --color-bg: #36363c;
+  --color-surface: #57575f;
+  --color-text: #eeeeef;
+  --color-text-soft: #c6c6c9;
+  --color-text-muted: #9f9fa4;
+  --color-divider: rgba(238, 238, 239, 0.14);
+  --color-divider-strong: rgba(238, 238, 239, 0.28);
 }
 
 * { box-sizing: border-box; }
@@ -139,6 +162,34 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
 
 .status { font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted); }
 
+.topbar-right { display: flex; align-items: center; gap: 12px; }
+
+/* -- Theme toggle — square switch (hairline border, sliding square thumb)
+      to match the blueprint aesthetic instead of an iOS-style pill. ------ */
+.theme-toggle {
+  position: relative;
+  flex: none;
+  width: 34px;
+  height: 17px;
+  padding: 0;
+  border: 1px solid var(--color-divider-strong);
+  background: var(--color-bg);
+  cursor: pointer;
+}
+.theme-toggle-thumb {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 13px;
+  height: 13px;
+  background: var(--color-text-muted);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.theme-toggle[aria-checked="true"] .theme-toggle-thumb {
+  transform: translateX(17px);
+  background: var(--color-accent);
+}
+
 /* -- Controls row: range chips + legend ------------------------------------ */
 .controls {
   display: flex;
@@ -163,7 +214,7 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
 }
 .chip:first-child { border-left: none; }
 .chip:hover { color: var(--color-text); }
-.chip.active { background: var(--color-accent); color: var(--color-bg); }
+.chip.active { background: var(--color-accent); color: var(--color-on-accent); }
 
 .legend { display: flex; gap: 14px; flex-wrap: wrap; }
 .legend-item {
@@ -284,22 +335,25 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
 svg text { font-family: var(--font-mono); fill: var(--color-text-muted); }
 
 /* -- Tooltip / crosshair ----------------------------------------------------- */
+/* Fixed dark surface in both themes (not var(--color-text)/(--color-bg),
+   which would flip with the theme and leave the hardcoded #fff children
+   below unreadable against a light dark-mode tooltip). */
 .tooltip {
   position: fixed;
   pointer-events: none;
   z-index: 20;
-  background: var(--color-text);
-  color: var(--color-bg);
+  background: #18181c;
+  color: #eeeeef;
   padding: 8px 10px;
   font-family: var(--font-mono);
   font-size: 11px;
   min-width: 140px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
 }
 .tooltip-head { font-weight: 600; margin-bottom: 4px; color: #fff; }
 .tooltip-row { display: flex; align-items: center; gap: 6px; padding: 1px 0; white-space: nowrap; }
 .tooltip-key { width: 11px; height: 2px; flex: none; }
-.tooltip-name { color: color-mix(in srgb, var(--color-bg) 70%, transparent); flex: 1; }
+.tooltip-name { color: color-mix(in srgb, #eeeeef 70%, transparent); flex: 1; }
 .tooltip-val { font-weight: 600; color: #fff; }
 
 /* -- Empty state ------------------------------------------------------------- */

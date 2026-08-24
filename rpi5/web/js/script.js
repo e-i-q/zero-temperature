@@ -13,7 +13,11 @@
   // the actual clamping (api/forecast.php's RANGE_HOURS).
   const FORECAST_RANGE_HOURS = { '12h': 12, '24h': 24, '2d': 48, '5d': 120, '1m': 30 * 24, all: Infinity };
   const MAX_CHART_POINTS = 1500; // per-sensor downsample cap for the two timeline charts
-  const GRID_COLOR = '#1d1f20'; // --color-text, used for hairline gridlines/night bands
+  // Hairline gridlines/night bands are drawn in the current theme's text
+  // color (dark ink on the light theme, light ink on the dark theme), read
+  // fresh on every draw rather than cached so a theme toggle repaints them
+  // correctly — see applyTheme()'s redraw call.
+  const gridColor = () => cssVar('--color-text');
 
   const ns = 'http://www.w3.org/2000/svg';
   const el = (id) => document.getElementById(id);
@@ -44,6 +48,41 @@
   let forecastRange = localStorage.getItem(FORECAST_RANGE_STORAGE_KEY) || '24h';
   let forecastReadings = []; // Open-Meteo hourly forecast rows, api/forecast.php's shape
   let forecastLoaded = false; // loaded lazily, the first time the Forecast tab is opened
+
+  // -- Theme (light/dark) ------------------------------------------------------
+  // The actual data-theme attribute is set as early as possible by the
+  // inline <script> in index.html's <head>, to avoid a flash of the wrong
+  // theme on load. currentTheme here just mirrors that for the toggle's own
+  // state; this module owns switching it from then on.
+  const THEME_STORAGE_KEY = 'hiveTheme';
+  let currentTheme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+
+  function applyTheme(theme) {
+    currentTheme = theme;
+    document.documentElement.setAttribute('data-theme', theme);
+    const toggle = el('theme-toggle');
+    if (toggle) toggle.setAttribute('aria-checked', theme === 'dark' ? 'true' : 'false');
+  }
+
+  // Gridlines and the chart end-marker ring are drawn with plain SVG
+  // attributes (not CSS), so they don't repaint on their own when the
+  // theme's CSS variables change — redraw whatever's currently on screen.
+  function redrawThemedCharts() {
+    if (sensors.length) {
+      drawChart('chart-temp', 'temperature_c', '°C', 220);
+      drawChart('chart-hum', 'humidity_pct', '%', 220);
+      drawLongChart();
+    }
+    if (forecastLoaded) drawForecastChart();
+  }
+
+  el('theme-toggle').addEventListener('click', () => {
+    const next = currentTheme === 'dark' ? 'light' : 'dark';
+    localStorage.setItem(THEME_STORAGE_KEY, next);
+    applyTheme(next);
+    redrawThemedCharts();
+  });
+  applyTheme(currentTheme); // sync the toggle's aria-checked to match the head script's choice
 
   function fmtTime(iso) {
     const d = new Date(iso);
@@ -491,13 +530,13 @@
     chartGeom[svgId] = { tMin, tMax, marginLeft, marginRight, marginTop, marginBottom, W, H, plotW, plotH };
 
     for (const [a, b] of nightBands(tMin, tMax)) {
-      svg.appendChild(makeEl('rect', { x: x(a), y: marginTop, width: Math.max(0, x(b) - x(a)), height: plotH, fill: GRID_COLOR, 'fill-opacity': 0.05 }));
+      svg.appendChild(makeEl('rect', { x: x(a), y: marginTop, width: Math.max(0, x(b) - x(a)), height: plotH, fill: gridColor(), 'fill-opacity': 0.05 }));
     }
 
     const vStepRaw = (vMax - vMin) / 4;
     const vStep = isTemp ? Math.max(1, Math.round(vStepRaw)) : Math.max(5, Math.round(vStepRaw / 5) * 5);
     for (let v = Math.ceil(vMin / vStep) * vStep; v <= vMax; v += vStep) {
-      svg.appendChild(makeEl('line', { x1: marginLeft, x2: W - marginRight, y1: y(v), y2: y(v), stroke: GRID_COLOR, 'stroke-opacity': 0.1, 'stroke-width': 1 }));
+      svg.appendChild(makeEl('line', { x1: marginLeft, x2: W - marginRight, y1: y(v), y2: y(v), stroke: gridColor(), 'stroke-opacity': 0.1, 'stroke-width': 1 }));
       svg.appendChild(makeEl('text', { x: marginLeft - 8, y: y(v) + 4, 'text-anchor': 'end', 'font-size': 10 })).textContent = isTemp ? v.toFixed(0) + '°' : v.toFixed(0) + unit;
     }
 
@@ -509,7 +548,7 @@
     for (; tick.getTime() <= tMax; tick.setHours(tick.getHours() + stepHours)) {
       const xPos = x(tick.getTime());
       const isMidnight = tick.getHours() === 0;
-      svg.appendChild(makeEl('line', { x1: xPos, x2: xPos, y1: marginTop, y2: H - marginBottom, stroke: GRID_COLOR, 'stroke-opacity': isMidnight ? 0.3 : 0.1, 'stroke-width': 1 }));
+      svg.appendChild(makeEl('line', { x1: xPos, x2: xPos, y1: marginTop, y2: H - marginBottom, stroke: gridColor(), 'stroke-opacity': isMidnight ? 0.3 : 0.1, 'stroke-width': 1 }));
       const label = (stepHours >= 24 || isMidnight) ? tick.toLocaleString(undefined, { month: 'short', day: 'numeric' }) : String(tick.getHours()).padStart(2, '0');
       svg.appendChild(makeEl('text', { x: xPos, y: H - 8, 'text-anchor': 'middle', 'font-size': 10 })).textContent = label;
     }
@@ -521,7 +560,9 @@
       const last = points[points.length - 1];
       const cx = x(new Date(last.recorded_at).getTime()), cy = y(last[valueKey]);
       // 2px surface ring so the end-marker stays legible where lines cross
-      svg.appendChild(makeEl('circle', { cx, cy, r: 5.5, fill: '#f2f2f3' }));
+      // — matches the card background, so it must be read live (not the
+      // '#f2f2f3' light-theme literal) to stay correct in dark mode.
+      svg.appendChild(makeEl('circle', { cx, cy, r: 5.5, fill: cssVar('--color-bg') }));
       svg.appendChild(makeEl('circle', { cx, cy, r: 4, fill: color }));
     }
   }
@@ -561,7 +602,7 @@
 
     const vStep = Math.max(1, Math.round((vMax - vMin) / 4));
     for (let v = Math.ceil(vMin / vStep) * vStep; v <= vMax; v += vStep) {
-      svg.appendChild(makeEl('line', { x1: marginLeft, x2: W - marginRight, y1: y(v), y2: y(v), stroke: GRID_COLOR, 'stroke-opacity': 0.1, 'stroke-width': 1 }));
+      svg.appendChild(makeEl('line', { x1: marginLeft, x2: W - marginRight, y1: y(v), y2: y(v), stroke: gridColor(), 'stroke-opacity': 0.1, 'stroke-width': 1 }));
       svg.appendChild(makeEl('text', { x: marginLeft - 8, y: y(v) + 4, 'text-anchor': 'end', 'font-size': 10 })).textContent = v.toFixed(0) + '°';
     }
 
@@ -571,7 +612,7 @@
     if (monthTick.getTime() < tMin) monthTick.setMonth(monthTick.getMonth() + 1);
     for (; monthTick.getTime() <= tMax; monthTick.setMonth(monthTick.getMonth() + 1)) {
       const xPos = x(monthTick.getTime());
-      svg.appendChild(makeEl('line', { x1: xPos, x2: xPos, y1: marginTop, y2: H - marginBottom, stroke: GRID_COLOR, 'stroke-opacity': 0.15, 'stroke-width': 1 }));
+      svg.appendChild(makeEl('line', { x1: xPos, x2: xPos, y1: marginTop, y2: H - marginBottom, stroke: gridColor(), 'stroke-opacity': 0.15, 'stroke-width': 1 }));
       svg.appendChild(makeEl('text', { x: xPos, y: H - 8, 'text-anchor': 'middle', 'font-size': 10 })).textContent = monthTick.toLocaleString(undefined, { month: 'short' });
     }
 
@@ -643,12 +684,12 @@
     const windColor = cssVar('--wind');
 
     for (const [a, b] of nightBands(tMin, tMax)) {
-      svg.appendChild(makeEl('rect', { x: x(a), y: marginTop, width: Math.max(0, x(b) - x(a)), height: plotH, fill: GRID_COLOR, 'fill-opacity': 0.05 }));
+      svg.appendChild(makeEl('rect', { x: x(a), y: marginTop, width: Math.max(0, x(b) - x(a)), height: plotH, fill: gridColor(), 'fill-opacity': 0.05 }));
     }
 
     // Horizontal gridlines - one per degree C
     for (let v = Math.ceil(tempMin); v <= Math.floor(tempMax); v++) {
-      svg.appendChild(makeEl('line', { x1: marginLeft, x2: W - marginRight, y1: yTemp(v), y2: yTemp(v), stroke: GRID_COLOR, 'stroke-opacity': 0.1, 'stroke-width': 1 }));
+      svg.appendChild(makeEl('line', { x1: marginLeft, x2: W - marginRight, y1: yTemp(v), y2: yTemp(v), stroke: gridColor(), 'stroke-opacity': 0.1, 'stroke-width': 1 }));
     }
 
     // Vertical gridlines + time labels - same stepping logic as the Overview charts
@@ -660,7 +701,7 @@
     for (; tick.getTime() <= tMax; tick.setHours(tick.getHours() + stepHours)) {
       const xPos = x(tick.getTime());
       const isMidnight = tick.getHours() === 0;
-      svg.appendChild(makeEl('line', { x1: xPos, x2: xPos, y1: marginTop, y2: H - marginBottom, stroke: GRID_COLOR, 'stroke-opacity': isMidnight ? 0.3 : 0.1, 'stroke-width': 1 }));
+      svg.appendChild(makeEl('line', { x1: xPos, x2: xPos, y1: marginTop, y2: H - marginBottom, stroke: gridColor(), 'stroke-opacity': isMidnight ? 0.3 : 0.1, 'stroke-width': 1 }));
       const label = (stepHours >= 24 || isMidnight) ? tick.toLocaleString(undefined, { month: 'short', day: 'numeric' }) : String(tick.getHours()).padStart(2, '0');
       svg.appendChild(makeEl('text', { x: xPos, y: H - 8, 'text-anchor': 'middle', 'font-size': 10 })).textContent = label;
     }
@@ -738,7 +779,7 @@
       if (!geom || !svg) continue;
       let line = svg.querySelector('.crosshair-line');
       if (!line) {
-        line = makeEl('line', { class: 'crosshair-line', stroke: GRID_COLOR, 'stroke-opacity': 0.4, 'stroke-width': 1 });
+        line = makeEl('line', { class: 'crosshair-line', stroke: gridColor(), 'stroke-opacity': 0.4, 'stroke-width': 1 });
         svg.appendChild(line);
       }
       const xPos = geom.marginLeft + ((t - geom.tMin) / (geom.tMax - geom.tMin || 1)) * geom.plotW;

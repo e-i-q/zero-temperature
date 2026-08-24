@@ -4,6 +4,19 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hive · Zero Temperature</title>
+<script>
+  /* Set the theme before CSS loads, so there's no flash of the wrong theme
+     on refresh. Kept inline/tiny and ahead of the stylesheet link on
+     purpose — script.js (loaded at the end of body) re-syncs the toggle's
+     own state from this once the DOM is ready. */
+  (function () {
+    try {
+      if (localStorage.getItem('hiveTheme') === 'dark') {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      }
+    } catch (e) { /* localStorage unavailable (e.g. private mode) — default to light */ }
+  })();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;700&family=Barlow+Condensed:wght@400;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -21,7 +34,12 @@
         <button class="tab" type="button" data-tab="forecast">Forecast</button>
       </nav>
     </div>
-    <span class="status" id="status">Loading…</span>
+    <div class="topbar-right">
+      <span class="status" id="status">Loading…</span>
+      <button class="theme-toggle" id="theme-toggle" type="button" role="switch" aria-checked="false" aria-label="Toggle dark mode" title="Toggle dark mode">
+        <span class="theme-toggle-thumb"></span>
+      </button>
+    </div>
   </header>
 
   <div class="tab-panel" data-panel="overview">
