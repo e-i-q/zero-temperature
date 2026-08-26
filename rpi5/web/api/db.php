@@ -3,7 +3,9 @@
  * db.php — shared PostgreSQL connection for the Hive dashboard's API
  * endpoints. Connects to the central database on this same Pi 5 as the
  * `web_reader` role (see ../../../../db/database/sensors/meta.md — read-only
- * grants on `sensors` and `readings`).
+ * grants on `sensors` and `readings`; despite the name, it also has
+ * read/write on `settings`/`passwords` for api/settings.php — see that
+ * file's docstring for why).
  *
  * Auth: no password is passed in code or read from the environment — PDO's
  * pgsql driver (via libpq) picks it up from www-data's ~/.pgpass, same

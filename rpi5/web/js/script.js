@@ -2,6 +2,7 @@
   const READINGS_URL = 'api/readings.php';
   const DAILY_URL = 'api/daily.php';
   const FORECAST_URL = 'api/forecast.php';
+  const SETTINGS_URL = 'api/settings.php';
   const REFRESH_MS = 60000; // poll for new data every minute
   const FORECAST_REFRESH_MS = REFRESH_MS * 5; // forecast.php itself caches Open-Meteo for 30min
   const RANGE_STORAGE_KEY = 'hiveRange';
@@ -48,6 +49,13 @@
   let forecastRange = localStorage.getItem(FORECAST_RANGE_STORAGE_KEY) || '24h';
   let forecastReadings = []; // Open-Meteo hourly forecast rows, api/forecast.php's shape
   let forecastLoaded = false; // loaded lazily, the first time the Forecast tab is opened
+
+  // -- Settings (password-profile-backed range persistence) -------------------
+  // See api/settings.php's docstring: no username, a password just picks a
+  // profile. Logged out, range chips behave exactly as before (localStorage
+  // only). Logged in, chip clicks also save to that profile so the choice
+  // follows you to other browsers/devices.
+  let settingsLoggedIn = false;
 
   // -- Theme (light/dark) ------------------------------------------------------
   // The actual data-theme attribute is set as early as possible by the
@@ -140,6 +148,22 @@
       throw new Error(detail);
     }
     return res.json();
+  }
+
+  // POST helper for api/settings.php — every call is a JSON body carrying
+  // an "action", and the X-Requested-With header is settings.php's cheap
+  // CSRF speed bump (see its docstring). Throws with the server's own
+  // {"error": "..."} message on failure, same convention as fetchJson.
+  async function postSettings(action, body) {
+    const res = await fetch(SETTINGS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
+      body: JSON.stringify({ action, ...body }),
+    });
+    let payload = null;
+    try { payload = await res.json(); } catch { /* fall through to status-based error below */ }
+    if (!res.ok) throw new Error((payload && payload.error) || 'HTTP ' + res.status);
+    return payload;
   }
 
   async function loadReadings() {
@@ -845,6 +869,110 @@
     svg.addEventListener('pointerleave', hideCrosshair);
   }
 
+  // -- Settings tab -------------------------------------------------------------
+  function renderSettingsCurrent() {
+    el('settings-current').textContent =
+      `Currently saved — Overview ${currentRange.toUpperCase()} · Forecast ${forecastRange.toUpperCase()}`;
+  }
+
+  function showSettingsLoggedIn() {
+    settingsLoggedIn = true;
+    el('settings-gate').hidden = true;
+    el('settings-profile').hidden = false;
+    renderSettingsCurrent();
+  }
+
+  function showSettingsLoggedOut() {
+    settingsLoggedIn = false;
+    el('settings-gate').hidden = false;
+    el('settings-profile').hidden = true;
+  }
+
+  function settingsError(message) {
+    const box = el('settings-error');
+    box.textContent = message;
+    box.hidden = false;
+  }
+
+  // Applies a settings profile's saved ranges as the active ranges — used on
+  // login/create and on the initial status check for an already-logged-in
+  // browser. Mirrors into localStorage too, so a later logged-out visit
+  // (e.g. after Log Out, or in a different browser) starts from the same
+  // place instead of jumping back to the hardcoded 24h default.
+  function applyRangesFromSettings(settings) {
+    currentRange = settings.overview_range;
+    forecastRange = settings.forecast_range;
+    localStorage.setItem(RANGE_STORAGE_KEY, currentRange);
+    localStorage.setItem(FORECAST_RANGE_STORAGE_KEY, forecastRange);
+    document.querySelectorAll('#range-chips .chip').forEach((b) => b.classList.toggle('active', b.dataset.range === currentRange));
+    document.querySelectorAll('#forecast-range-chips .chip').forEach((b) => b.classList.toggle('active', b.dataset.range === forecastRange));
+  }
+
+  // Fire-and-forget save, called from the range-chip handlers below when
+  // logged in. Errors are surfaced quietly (console only) — a failed save
+  // shouldn't interrupt browsing, and the chip click already took effect
+  // locally (localStorage + the chart redraw) regardless.
+  function saveSettingsIfLoggedIn() {
+    if (!settingsLoggedIn) return;
+    postSettings('save', { overview_range: currentRange, forecast_range: forecastRange })
+      .then(() => renderSettingsCurrent())
+      .catch((err) => console.error('Failed to save settings:', err.message));
+  }
+
+  async function initSettingsStatus() {
+    try {
+      const payload = await postSettings('status', {});
+      if (payload.loggedIn) {
+        applyRangesFromSettings(payload.settings);
+        showSettingsLoggedIn();
+      }
+    } catch (err) {
+      console.error('Failed to check settings status:', err.message);
+    }
+  }
+
+  el('settings-login-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    el('settings-error').hidden = true;
+    const password = el('settings-password').value;
+    try {
+      const payload = await postSettings('login', { password });
+      applyRangesFromSettings(payload.settings);
+      showSettingsLoggedIn();
+      el('settings-password').value = '';
+      loadReadings();
+      if (forecastLoaded) loadForecast();
+    } catch (err) {
+      settingsError(err.message);
+    }
+  });
+
+  el('settings-create-btn').addEventListener('click', async () => {
+    el('settings-error').hidden = true;
+    const password = el('settings-password').value;
+    try {
+      const payload = await postSettings('create', {
+        password,
+        overview_range: currentRange,
+        forecast_range: forecastRange,
+      });
+      applyRangesFromSettings(payload.settings);
+      showSettingsLoggedIn();
+      el('settings-password').value = '';
+    } catch (err) {
+      settingsError(err.message);
+    }
+  });
+
+  el('settings-logout-btn').addEventListener('click', async () => {
+    try {
+      await postSettings('logout', {});
+    } catch (err) {
+      console.error('Failed to log out cleanly:', err.message);
+    }
+    showSettingsLoggedOut();
+  });
+
   // -- Range chips --------------------------------------------------------------
   // Scoped to each panel's own chip group — #range-chips and
   // #forecast-range-chips both use the shared .chip class, so a global
@@ -857,6 +985,7 @@
     btn.classList.add('active');
     currentRange = btn.dataset.range;
     localStorage.setItem(RANGE_STORAGE_KEY, currentRange);
+    saveSettingsIfLoggedIn();
     loadReadings();
   });
   document.querySelectorAll('#range-chips .chip').forEach((b) => b.classList.toggle('active', b.dataset.range === currentRange));
@@ -868,6 +997,7 @@
     btn.classList.add('active');
     forecastRange = btn.dataset.range;
     localStorage.setItem(FORECAST_RANGE_STORAGE_KEY, forecastRange);
+    saveSettingsIfLoggedIn();
     loadForecast();
   });
   document.querySelectorAll('#forecast-range-chips .chip').forEach((b) => b.classList.toggle('active', b.dataset.range === forecastRange));
@@ -892,8 +1022,15 @@
   attachCrosshair('chart-temp');
   attachCrosshair('chart-hum');
 
-  loadReadings();
-  loadDaily();
+  // Check for an already-logged-in settings profile (a returning browser's
+  // session cookie) before the first load, so its saved ranges are used as
+  // the actual starting point rather than flashing the localStorage/default
+  // range first. Never blocks the dashboard on this — a failed/slow check
+  // just falls through to whatever was already in localStorage.
+  initSettingsStatus().finally(() => {
+    loadReadings();
+    loadDaily();
+  });
   setInterval(loadReadings, REFRESH_MS);
   setInterval(loadDaily, REFRESH_MS * 15); // 12-month aggregates barely change minute to minute
   setInterval(renderStatus, 1000);

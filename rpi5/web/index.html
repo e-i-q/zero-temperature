@@ -32,6 +32,7 @@
       <nav class="tabs" id="tabs">
         <button class="tab active" type="button" data-tab="overview">Overview</button>
         <button class="tab" type="button" data-tab="forecast">Forecast</button>
+        <button class="tab" type="button" data-tab="settings">Settings</button>
       </nav>
     </div>
     <div class="topbar-right">
@@ -150,6 +151,36 @@
       <span id="forecast-footer-count">—</span>
       <span id="forecast-footer-generated">—</span>
     </footer>
+
+  </div>
+
+  <div class="tab-panel" data-panel="settings" hidden>
+
+    <div class="settings-panel">
+      <p class="settings-blurb">
+        Settings save your chosen Overview/Forecast time spans to a small
+        password-protected profile in the Hive database, so they follow you
+        across browsers and devices — click the range chips as usual once
+        logged in. There's no username, just a password. If you never log
+        in, your choices simply stay in this browser, same as before this
+        tab existed.
+      </p>
+
+      <div class="settings-gate" id="settings-gate">
+        <form class="settings-form" id="settings-login-form">
+          <input type="password" class="settings-input" id="settings-password" placeholder="Password" autocomplete="current-password" required>
+          <button type="submit" class="btn">Log In</button>
+          <button type="button" class="btn btn-secondary" id="settings-create-btn">Make New Settings</button>
+        </form>
+        <p class="settings-error" id="settings-error" hidden></p>
+      </div>
+
+      <div class="settings-profile" id="settings-profile" hidden>
+        <p class="settings-status">Logged in — Overview/Forecast chip clicks now save here.</p>
+        <p class="settings-current" id="settings-current"></p>
+        <button type="button" class="btn btn-secondary" id="settings-logout-btn">Log Out</button>
+      </div>
+    </div>
 
   </div>
 

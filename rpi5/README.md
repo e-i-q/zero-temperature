@@ -12,7 +12,10 @@ Visual design follows [`../IoT Temperature Dashboard Wireframe`](<../IoT Tempera
 temperature/humidity timelines with a linked crosshair, and a 12-month
 long-term view. A second tab, Forecast, shows the Open-Meteo forecast for
 the same location the sensors are in — ported from `../rpi-zero`'s weather
-comparison chart, but looking forward instead of back.
+comparison chart, but looking forward instead of back. A third tab,
+Settings, lets the Overview/Forecast time-span choice follow you across
+browsers via a password-protected profile stored in the Hive database
+(see "Settings tab" below).
 
 ```
 PostgreSQL (Hive, this Pi)  →  api/readings.php, api/daily.php  →  dashboard
@@ -27,6 +30,7 @@ PostgreSQL (Hive, this Pi)  →  api/readings.php, api/daily.php  →  dashboard
 | `web/api/readings.php` | JSON API: every sensor's readings in a requested time window, plus latest/min/avg/max per sensor |
 | `web/api/daily.php` | JSON API: 12 months of daily mean/min/max temperature per sensor, aggregated in PostgreSQL |
 | `web/api/forecast.php` | JSON API: Open-Meteo hourly forecast (temperature/humidity/wind/condition) for the Forecast tab. No database — a cached proxy, same pattern as `../rpi-zero/web/weather.php` |
+| `web/api/settings.php` | JSON API backing the Settings tab: password-profile login/create/save/logout, session-cookie-backed. See its docstring |
 | `setup/setup_nginx_php.sh` | Installs and configures nginx + PHP-FPM (with `pdo_pgsql`) |
 | `setup/deploy_web.sh` | Syncs `web/` into the nginx web root |
 | `setup/lib/log.sh` | Shared colored logging + quiet-by-default install output for the scripts above |
@@ -100,3 +104,13 @@ After setup, the dashboard is served at `http://<pi5-address>/`.
   that ceiling instead of their literal meaning. Fetched lazily (only once
   the tab is first opened) and cached server-side for 30 minutes, same as
   `../rpi-zero/web/weather.php`.
+- **Settings tab**: not logged in, the Overview/Forecast range chips work
+  exactly as they always have (remembered per-browser in `localStorage`).
+  Logging in — a password, no username — attaches those same chip clicks to
+  a profile row in the Hive database (`settings`/`passwords` tables) instead,
+  so the choice follows you to any other browser that logs into the same
+  profile. "Make New Settings" creates a fresh profile from whatever you
+  type. This is a convenience, not an access-control feature: see
+  `web/api/settings.php`'s docstring and `../../db/database/sensors/meta.md`
+  for why it deliberately reuses `web_reader`'s own DB credentials rather
+  than adding a second role.
