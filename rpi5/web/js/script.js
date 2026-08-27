@@ -7,12 +7,11 @@
   const FORECAST_REFRESH_MS = REFRESH_MS * 5; // forecast.php itself caches Open-Meteo for 30min
   const RANGE_STORAGE_KEY = 'hiveRange';
   const FORECAST_RANGE_STORAGE_KEY = 'hiveForecastRange';
-  // Each chip's *literal* meaning (matching readings.php's RANGE_MODIFIERS),
-  // used client-side only to decide whether to show the "clamped to
-  // Open-Meteo's max" note — deliberately NOT pre-clamped, or the note could
-  // never fire for the one/two ranges it exists to explain. The server does
-  // the actual clamping (api/forecast.php's RANGE_HOURS).
-  const FORECAST_RANGE_HOURS = { '12h': 12, '24h': 24, '2d': 48, '5d': 120, '1m': 30 * 24, all: Infinity };
+  // The fixed chip set for logged-out visitors (and brand-new profiles) —
+  // matches api/settings.php's DEFAULT_RANGES. A logged-in profile can
+  // replace this list entirely via the Settings tab's editor; see
+  // availableRanges below and renderChips().
+  const DEFAULT_RANGES = ['12h', '24h', '2d', '5d', '1m', 'all'];
   const MAX_CHART_POINTS = 1500; // per-sensor downsample cap for the two timeline charts
   // Hairline gridlines/night bands are drawn in the current theme's text
   // color (dark ink on the light theme, light ink on the dark theme), read
@@ -52,10 +51,13 @@
 
   // -- Settings (password-profile-backed range persistence) -------------------
   // See api/settings.php's docstring: no username, a password just picks a
-  // profile. Logged out, range chips behave exactly as before (localStorage
-  // only). Logged in, chip clicks also save to that profile so the choice
-  // follows you to other browsers/devices.
+  // profile. Logged out, range chips behave exactly as before (the fixed
+  // DEFAULT_RANGES set, localStorage only). Logged in, chip clicks also save
+  // to that profile, and the Settings tab lets you edit availableRanges
+  // itself (add/remove/reorder), so the choice — and the chip set it's
+  // chosen from — follows you to other browsers/devices.
   let settingsLoggedIn = false;
+  let availableRanges = DEFAULT_RANGES.slice(); // shared by both Overview and Forecast chip rows
 
   // -- Theme (light/dark) ------------------------------------------------------
   // The actual data-theme attribute is set as early as possible by the
@@ -199,9 +201,7 @@
       el('forecast-empty-state').hidden = forecastReadings.length > 0;
       el('section-forecast').style.display = forecastReadings.length ? 'block' : 'none';
       drawForecastChart();
-      const rangeHours = FORECAST_RANGE_HOURS[forecastRange] ?? FORECAST_RANGE_HOURS['24h'];
-      const clamped = rangeHours > payload.forecast_days_max * 24;
-      el('forecast-note').textContent = clamped
+      el('forecast-note').textContent = payload.clamped
         ? `shaded bands = approx. night (20:00–06:00) · Open-Meteo only forecasts ${payload.forecast_days_max} days ahead — showing the max available`
         : 'shaded bands = approx. night (20:00–06:00)';
       el('forecast-footer-count').textContent = payload.count + ' forecast hour' + (payload.count === 1 ? '' : 's');
@@ -880,12 +880,37 @@
     el('settings-gate').hidden = true;
     el('settings-profile').hidden = false;
     renderSettingsCurrent();
+    renderRangesEditor();
   }
 
   function showSettingsLoggedOut() {
     settingsLoggedIn = false;
     el('settings-gate').hidden = false;
     el('settings-profile').hidden = true;
+    el('ranges-list').innerHTML = '';
+
+    // Revert to the fixed default chip set. If either tab's active
+    // selection was a custom token that only existed in the profile just
+    // logged out of (e.g. "1w"), it wouldn't appear in this list — fall
+    // back to 24h rather than leaving no chip highlighted.
+    availableRanges = DEFAULT_RANGES.slice();
+    let changed = false;
+    if (!availableRanges.includes(currentRange)) {
+      currentRange = '24h';
+      localStorage.setItem(RANGE_STORAGE_KEY, currentRange);
+      changed = true;
+    }
+    if (!availableRanges.includes(forecastRange)) {
+      forecastRange = '24h';
+      localStorage.setItem(FORECAST_RANGE_STORAGE_KEY, forecastRange);
+      changed = true;
+    }
+    renderChips('range-chips', currentRange);
+    renderChips('forecast-range-chips', forecastRange);
+    if (changed) {
+      loadReadings();
+      if (forecastLoaded) loadForecast();
+    }
   }
 
   function settingsError(message) {
@@ -894,18 +919,22 @@
     box.hidden = false;
   }
 
-  // Applies a settings profile's saved ranges as the active ranges — used on
-  // login/create and on the initial status check for an already-logged-in
-  // browser. Mirrors into localStorage too, so a later logged-out visit
-  // (e.g. after Log Out, or in a different browser) starts from the same
-  // place instead of jumping back to the hardcoded 24h default.
+  // Applies a settings profile's saved state (chip set + which chip is
+  // active per tab) — used on login/create, on a ranges edit, and on the
+  // initial status check for an already-logged-in browser. Mirrors into
+  // localStorage too, so a later logged-out visit (e.g. after Log Out, or
+  // in a different browser) starts from the same place instead of jumping
+  // back to the hardcoded default.
   function applyRangesFromSettings(settings) {
+    if (Array.isArray(settings.ranges) && settings.ranges.length) {
+      availableRanges = settings.ranges.slice();
+    }
     currentRange = settings.overview_range;
     forecastRange = settings.forecast_range;
     localStorage.setItem(RANGE_STORAGE_KEY, currentRange);
     localStorage.setItem(FORECAST_RANGE_STORAGE_KEY, forecastRange);
-    document.querySelectorAll('#range-chips .chip').forEach((b) => b.classList.toggle('active', b.dataset.range === currentRange));
-    document.querySelectorAll('#forecast-range-chips .chip').forEach((b) => b.classList.toggle('active', b.dataset.range === forecastRange));
+    renderChips('range-chips', currentRange);
+    renderChips('forecast-range-chips', forecastRange);
   }
 
   // Fire-and-forget save, called from the range-chip handlers below when
@@ -973,7 +1002,138 @@
     showSettingsLoggedOut();
   });
 
+  // -- Time-span editor (add/remove/reorder availableRanges) ------------------
+  // Only shown logged in — editing has nowhere to save to otherwise. Every
+  // mutation saves immediately (no separate "Save" button), matching how a
+  // chip click already auto-saves elsewhere in this tab.
+  function renderRangesEditor() {
+    const list = el('ranges-list');
+    list.innerHTML = '';
+    availableRanges.forEach((token, i) => {
+      const li = document.createElement('li');
+      li.className = 'ranges-item';
+
+      const label = document.createElement('span');
+      label.className = 'ranges-item-label';
+      label.textContent = token.toUpperCase();
+      li.appendChild(label);
+
+      const up = document.createElement('button');
+      up.type = 'button';
+      up.className = 'ranges-item-btn';
+      up.dataset.action = 'up';
+      up.dataset.index = String(i);
+      up.disabled = i === 0;
+      up.title = 'Move earlier';
+      up.textContent = '▲';
+
+      const down = document.createElement('button');
+      down.type = 'button';
+      down.className = 'ranges-item-btn';
+      down.dataset.action = 'down';
+      down.dataset.index = String(i);
+      down.disabled = i === availableRanges.length - 1;
+      down.title = 'Move later';
+      down.textContent = '▼';
+
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'ranges-item-btn remove';
+      remove.dataset.action = 'remove';
+      remove.dataset.index = String(i);
+      remove.disabled = availableRanges.length <= 1;
+      remove.title = 'Remove';
+      remove.textContent = '✕';
+
+      li.append(up, down, remove);
+      list.appendChild(li);
+    });
+  }
+
+  // Posts a full replacement list to settings.php and applies whatever it
+  // hands back (it may auto-correct overview_range/forecast_range if the
+  // edit removed the one currently active). Callers attach their own
+  // .catch() for how to surface a failure.
+  function saveRanges(newList) {
+    el('ranges-error').hidden = true;
+    return postSettings('save_ranges', { ranges: newList }).then((payload) => {
+      applyRangesFromSettings(payload.settings);
+      renderSettingsCurrent();
+      renderRangesEditor();
+      loadReadings();
+      if (forecastLoaded) loadForecast();
+    });
+  }
+
+  function rangesEditorError(message) {
+    const box = el('ranges-error');
+    box.textContent = message;
+    box.hidden = false;
+  }
+
+  el('ranges-list').addEventListener('click', (e) => {
+    const btn = e.target.closest('.ranges-item-btn');
+    if (!btn || btn.disabled) return;
+    const i = Number(btn.dataset.index);
+    const next = availableRanges.slice();
+    if (btn.dataset.action === 'remove') {
+      next.splice(i, 1);
+    } else if (btn.dataset.action === 'up' && i > 0) {
+      [next[i - 1], next[i]] = [next[i], next[i - 1]];
+    } else if (btn.dataset.action === 'down' && i < next.length - 1) {
+      [next[i], next[i + 1]] = [next[i + 1], next[i]];
+    } else {
+      return;
+    }
+    saveRanges(next).catch((err) => rangesEditorError(err.message));
+  });
+
+  // Same token shape as api/settings.php's validRangeToken() — checked
+  // client-side too so an obviously malformed entry doesn't round-trip to
+  // the server just to be rejected.
+  const RANGE_TOKEN_RE = /^(all|[1-9]\d{0,2}(h|d|w|m))$/;
+
+  el('ranges-add-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    el('ranges-error').hidden = true;
+    const input = el('ranges-add-input');
+    const token = input.value.trim().toLowerCase();
+    if (!RANGE_TOKEN_RE.test(token)) {
+      rangesEditorError('Use a number plus h/d/w/m (e.g. 6h, 3d, 1w, 2m), or "all".');
+      return;
+    }
+    if (availableRanges.includes(token)) {
+      rangesEditorError('That time span is already in the list.');
+      return;
+    }
+    if (availableRanges.length >= 12) {
+      rangesEditorError('At most 12 time spans are allowed.');
+      return;
+    }
+    saveRanges([...availableRanges, token])
+      .then(() => { input.value = ''; })
+      .catch((err) => rangesEditorError(err.message));
+  });
+
   // -- Range chips --------------------------------------------------------------
+  // Both rows are built from the same availableRanges list (the fixed
+  // DEFAULT_RANGES when logged out, or the logged-in profile's own edited
+  // list — see the Settings tab). Click handling is delegated to each
+  // container, so it keeps working unchanged as chips are added/removed/
+  // reordered and the buttons underneath get rebuilt.
+  function renderChips(containerId, activeValue) {
+    const box = el(containerId);
+    box.innerHTML = '';
+    availableRanges.forEach((token) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'chip' + (token === activeValue ? ' active' : '');
+      btn.dataset.range = token;
+      btn.textContent = token.toUpperCase();
+      box.appendChild(btn);
+    });
+  }
+
   // Scoped to each panel's own chip group — #range-chips and
   // #forecast-range-chips both use the shared .chip class, so a global
   // querySelectorAll('.chip') here would also clear the other panel's
@@ -988,7 +1148,6 @@
     saveSettingsIfLoggedIn();
     loadReadings();
   });
-  document.querySelectorAll('#range-chips .chip').forEach((b) => b.classList.toggle('active', b.dataset.range === currentRange));
 
   document.getElementById('forecast-range-chips').addEventListener('click', (e) => {
     const btn = e.target.closest('.chip');
@@ -1000,7 +1159,9 @@
     saveSettingsIfLoggedIn();
     loadForecast();
   });
-  document.querySelectorAll('#forecast-range-chips .chip').forEach((b) => b.classList.toggle('active', b.dataset.range === forecastRange));
+
+  renderChips('range-chips', currentRange);
+  renderChips('forecast-range-chips', forecastRange);
 
   // -- Tabs -----------------------------------------------------------------
   // The Forecast tab's data is fetched lazily, the first time it's opened,

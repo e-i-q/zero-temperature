@@ -46,14 +46,10 @@
   <div class="tab-panel" data-panel="overview">
 
     <div class="controls">
-      <div class="range-chips" id="range-chips">
-        <button class="chip" data-range="12h">12H</button>
-        <button class="chip active" data-range="24h">24H</button>
-        <button class="chip" data-range="2d">2D</button>
-        <button class="chip" data-range="5d">5D</button>
-        <button class="chip" data-range="1m">1M</button>
-        <button class="chip" data-range="all">ALL</button>
-      </div>
+      <!-- Populated by script.js's renderChips() — from the logged-in
+           profile's `ranges` list if any, otherwise the fixed default set.
+           See Settings tab to add/remove/reorder these. -->
+      <div class="range-chips" id="range-chips"></div>
       <div class="legend" id="legend"></div>
     </div>
 
@@ -117,14 +113,9 @@
   <div class="tab-panel" data-panel="forecast" hidden>
 
     <div class="controls">
-      <div class="range-chips" id="forecast-range-chips">
-        <button class="chip" data-range="12h">12H</button>
-        <button class="chip active" data-range="24h">24H</button>
-        <button class="chip" data-range="2d">2D</button>
-        <button class="chip" data-range="5d">5D</button>
-        <button class="chip" data-range="1m">1M</button>
-        <button class="chip" data-range="all">ALL</button>
-      </div>
+      <!-- Same list as #range-chips (Overview and Forecast always share one
+           time-span set) — see renderChips() in script.js. -->
+      <div class="range-chips" id="forecast-range-chips"></div>
       <div class="legend" id="forecast-legend">
         <div class="legend-item static"><span class="legend-swatch" style="background:var(--temp)"></span><span>Temperature</span></div>
         <div class="legend-item static"><span class="legend-swatch" style="background:var(--humidity)"></span><span>Humidity</span></div>
@@ -178,6 +169,15 @@
       <div class="settings-profile" id="settings-profile" hidden>
         <p class="settings-status">Logged in — Overview/Forecast chip clicks now save here.</p>
         <p class="settings-current" id="settings-current"></p>
+
+        <p class="settings-status">Time spans (shared by both Overview and Forecast):</p>
+        <ul class="ranges-list" id="ranges-list"></ul>
+        <form class="settings-form" id="ranges-add-form">
+          <input type="text" class="settings-input ranges-input" id="ranges-add-input" placeholder="e.g. 6h, 3d, 1w" maxlength="8" required>
+          <button type="submit" class="btn btn-secondary">Add Time Span</button>
+        </form>
+        <p class="settings-error" id="ranges-error" hidden></p>
+
         <button type="button" class="btn btn-secondary" id="settings-logout-btn">Log Out</button>
       </div>
     </div>

@@ -6,7 +6,13 @@
  * centralizing the data).
  *
  * Query params (all optional):
- *   ?range=24h   One of RANGE_MODIFIERS below, or "all". Default 24h.
+ *   ?range=24h   A <number><unit> token (unit one of h/d/w/m — hours, days,
+ *                weeks, months) or "all". Default 24h. Historically a fixed
+ *                enum (12h/24h/2d/5d/1m); now the Settings tab lets a
+ *                logged-in profile define its own token set
+ *                (web/api/settings.php), so this parses the general shape
+ *                instead of matching against a hardcoded list — see
+ *                rangeModifier() below.
  */
 
 declare(strict_types=1);
@@ -17,21 +23,25 @@ header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, no-cache, must-revalidate');
 
 // -- Configuration ----------------------------------------------------------
-// PHP relative-date modifiers (DateTime::modify), not SQL — the cutoff is
-// computed here and bound as a plain timestamp, rather than asking
-// PostgreSQL to parse an interval string. That sidesteps a real PDO_PGSQL
-// gotcha: a `::type` cast placed directly after a bound `:placeholder`
-// (e.g. `:window::interval`) confuses PDO's own placeholder parser and
-// throws a "syntax error" PDOException before the query ever reaches
-// PostgreSQL — see https://bugs.php.net/bug.php?id=80863 and friends.
-const RANGE_MODIFIERS = [
-    '12h' => '-12 hours',
-    '24h' => '-24 hours',
-    '2d'  => '-2 days',
-    '5d'  => '-5 days',
-    '1m'  => '-1 month',
-];
 const DEFAULT_RANGE = '24h';
+
+// Turns a "<number><unit>" token into a PHP relative-date modifier
+// (DateTime::modify), not SQL — the cutoff is computed here and bound as a
+// plain timestamp, rather than asking PostgreSQL to parse an interval
+// string. That sidesteps a real PDO_PGSQL gotcha: a `::type` cast placed
+// directly after a bound `:placeholder` (e.g. `:window::interval`) confuses
+// PDO's own placeholder parser and throws a "syntax error" PDOException
+// before the query ever reaches PostgreSQL — see
+// https://bugs.php.net/bug.php?id=80863 and friends.
+// Returns null for anything that isn't a valid token (including "all",
+// which the caller handles separately since it has no fixed modifier).
+function rangeModifier(string $range): ?string {
+    if (!preg_match('/^([1-9]\d{0,2})(h|d|w|m)$/', $range, $m)) {
+        return null;
+    }
+    $units = ['h' => 'hours', 'd' => 'days', 'w' => 'weeks', 'm' => 'months'];
+    return '-' . $m[1] . ' ' . $units[$m[2]];
+}
 
 // A sensor with no reading in the last OFFLINE_MINUTES is shown as offline.
 // Zeros default to a 10-minute cron interval (setup_dht22_logger.sh), so 30
@@ -45,8 +55,10 @@ const MAX_ROWS = 20000;
 
 // -- Parse + validate query params ------------------------------------------
 $range = (string) ($_GET['range'] ?? DEFAULT_RANGE);
-if ($range !== 'all' && !array_key_exists($range, RANGE_MODIFIERS)) {
+$modifier = $range === 'all' ? null : rangeModifier($range);
+if ($range !== 'all' && $modifier === null) {
     $range = DEFAULT_RANGE;
+    $modifier = rangeModifier(DEFAULT_RANGE);
 }
 
 $pdo = db();
@@ -73,7 +85,7 @@ try {
         // recorded_at is UTC wall-clock (no tz) — compute the cutoff in UTC
         // too, so this doesn't drift with the web server's local time zone.
         $since = new DateTimeImmutable('now', new DateTimeZone('UTC'));
-        $since = $since->modify(RANGE_MODIFIERS[$range]);
+        $since = $since->modify($modifier);
         $stmt->bindValue(':since', $since->format('Y-m-d H:i:s'), PDO::PARAM_STR);
     }
     $stmt->bindValue(':limit', MAX_ROWS, PDO::PARAM_INT);

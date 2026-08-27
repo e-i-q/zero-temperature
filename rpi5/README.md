@@ -83,11 +83,12 @@ After setup, the dashboard is served at `http://<pi5-address>/`.
 
 ## Notes on scope
 
-- **Ranges**: 12H / 24H / 2D / 5D / 1M / ALL. `readings.php` queries
-  PostgreSQL live for whichever window is selected (no caching — the
-  point of centralizing is that this always reflects every Zero's latest
-  write). "ALL" is capped at 20,000 rows as a payload-size safety net, not
-  a time-window limit.
+- **Ranges**: 12H / 24H / 2D / 5D / 1M / ALL by default — editable per
+  logged-in Settings profile (see "Settings tab" below). `readings.php`
+  queries PostgreSQL live for whichever window is selected (no caching —
+  the point of centralizing is that this always reflects every Zero's
+  latest write). "ALL" is capped at 20,000 rows as a payload-size safety
+  net, not a time-window limit.
 - **Long-term chart**: aggregated server-side (`daily.php`) rather than
   shipping a year of raw rows to the browser.
 - **Night shading** on the timeline charts is a fixed 20:00–06:00
@@ -105,12 +106,19 @@ After setup, the dashboard is served at `http://<pi5-address>/`.
   the tab is first opened) and cached server-side for 30 minutes, same as
   `../rpi-zero/web/weather.php`.
 - **Settings tab**: not logged in, the Overview/Forecast range chips work
-  exactly as they always have (remembered per-browser in `localStorage`).
-  Logging in — a password, no username — attaches those same chip clicks to
-  a profile row in the Hive database (`settings`/`passwords` tables) instead,
-  so the choice follows you to any other browser that logs into the same
-  profile. "Make New Settings" creates a fresh profile from whatever you
-  type. This is a convenience, not an access-control feature: see
-  `web/api/settings.php`'s docstring and `../../db/database/sensors/meta.md`
-  for why it deliberately reuses `web_reader`'s own DB credentials rather
-  than adding a second role.
+  exactly as they always have — the fixed 12H/24H/2D/5D/1M/ALL set,
+  remembered per-browser in `localStorage`. Logging in — a password, no
+  username — attaches those same chip clicks to a profile row in the Hive
+  database (`settings`/`passwords` tables) instead, so the choice follows
+  you to any other browser that logs into the same profile. "Make New
+  Settings" creates a fresh profile from whatever you type. This is a
+  convenience, not an access-control feature: see `web/api/settings.php`'s
+  docstring and `../../db/database/sensors/meta.md` for why it deliberately
+  reuses `web_reader`'s own DB credentials rather than adding a second role.
+  A logged-in profile can also edit the chip set itself — add, remove, and
+  reorder time spans, including ones that don't exist in the default set
+  (any `<number><unit>` token, unit one of h/d/w/m, or "all") — and that
+  edited list drives both tabs' chip rows, since they've always shown the
+  same set. `readings.php`/`forecast.php` parse the token shape generally
+  rather than matching a hardcoded list, to accept whatever a profile has
+  defined.

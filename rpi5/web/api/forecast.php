@@ -11,12 +11,14 @@
  * proxy/cache in front of Open-Meteo, same as weather.php.
  *
  * Query params (all optional):
- *   ?range=24h   One of RANGE_HOURS below, or "all". Default 24h. Same keys
- *                as api/readings.php's ?range so the Forecast tab can reuse
- *                the Overview tab's range-chip UI. Open-Meteo's free
- *                forecast API only looks FORECAST_DAYS_MAX days ahead, so
- *                "1m" and "all" are both clamped to that ceiling rather than
- *                their literal (1 month / unbounded) meaning.
+ *   ?range=24h   A <number><unit> token (unit one of h/d/w/m — hours, days,
+ *                weeks, months) or "all". Default 24h. Same shape as
+ *                api/readings.php's ?range so the Forecast tab can reuse the
+ *                Overview tab's range-chip UI (both driven by the same
+ *                user-editable list — see web/api/settings.php). Open-Meteo's
+ *                free forecast API only looks FORECAST_DAYS_MAX days ahead,
+ *                so anything past that (including "all") is clamped to that
+ *                ceiling rather than its literal meaning.
  */
 
 declare(strict_types=1);
@@ -26,15 +28,18 @@ const WEATHER_LATITUDE = 49.1951;  // Brno — same location as rpi-zero/web/wea
 const WEATHER_LONGITUDE = 16.6068;
 const FORECAST_DAYS_MAX = 16;      // Open-Meteo's free-tier ceiling for /v1/forecast
 const FORECAST_CACHE_TTL = 1800;   // 30 minutes, same as weather.php — forecasts don't move minute to minute
-
-const RANGE_HOURS = [
-    '12h' => 12,
-    '24h' => 24,
-    '2d'  => 48,
-    '5d'  => 120,
-    '1m'  => FORECAST_DAYS_MAX * 24,
-];
 const DEFAULT_RANGE = '24h';
+
+// Turns a "<number><unit>" token into a forward-looking hour count. Returns
+// null for anything that isn't a valid token (including "all", which the
+// caller handles separately since it has no fixed hour count).
+function rangeHours(string $range): ?int {
+    if (!preg_match('/^([1-9]\d{0,2})(h|d|w|m)$/', $range, $m)) {
+        return null;
+    }
+    $hoursPerUnit = ['h' => 1, 'd' => 24, 'w' => 24 * 7, 'm' => 24 * 30];
+    return (int) $m[1] * $hoursPerUnit[$m[2]];
+}
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, no-cache, must-revalidate');
@@ -114,10 +119,18 @@ function getForecastRows(): array {
 
 // -- Parse + validate query params ---------------------------------------
 $range = (string) ($_GET['range'] ?? DEFAULT_RANGE);
-if ($range !== 'all' && !array_key_exists($range, RANGE_HOURS)) {
+$rawHoursAhead = $range === 'all' ? (FORECAST_DAYS_MAX * 24) : rangeHours($range);
+if ($rawHoursAhead === null) {
     $range = DEFAULT_RANGE;
+    $rawHoursAhead = rangeHours(DEFAULT_RANGE);
 }
-$hoursAhead = $range === 'all' ? RANGE_HOURS['1m'] : RANGE_HOURS[$range];
+// Open-Meteo's free tier never has more than FORECAST_DAYS_MAX days cached
+// regardless of what's requested — clamp explicitly (rather than relying on
+// the array_filter below to just come up short) so the client can be told
+// this window was cut short instead of silently getting fewer rows than a
+// literal reading of its own chip would suggest.
+$hoursAhead = min($rawHoursAhead, FORECAST_DAYS_MAX * 24);
+$clamped = $rawHoursAhead > FORECAST_DAYS_MAX * 24;
 
 $all = getForecastRows();
 
@@ -137,6 +150,7 @@ $payload = [
     'generated_at'      => gmdate('c'),
     'range'             => $range,
     'forecast_days_max' => FORECAST_DAYS_MAX,
+    'clamped'           => $clamped, // true if $range asked for more than Open-Meteo can give
     'count'             => count($readings),
     'latest'            => $soonest, // nearest upcoming hour, not "most recent" — there's no history here
     'readings'          => $readings,

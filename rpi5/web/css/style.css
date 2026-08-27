@@ -305,6 +305,48 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
   margin: 0 0 16px;
 }
 
+.ranges-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ranges-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--color-divider-strong);
+  background: var(--color-bg);
+  padding: 5px 6px 5px 10px;
+}
+
+.ranges-item-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  flex: 1;
+}
+
+.ranges-item-btn {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--color-divider-strong);
+  background: none;
+  color: var(--color-text-soft);
+  cursor: pointer;
+}
+.ranges-item-btn:hover:not(:disabled) { background: var(--color-surface); color: var(--color-text); }
+.ranges-item-btn:disabled { opacity: 0.3; cursor: default; }
+.ranges-item-btn.remove:hover:not(:disabled) { border-color: var(--series-8); color: var(--series-8); }
+
+.ranges-input { flex: 1 1 120px; max-width: 160px; }
+
 /* -- Sensor tiles ----------------------------------------------------------- */
 .tile-grid {
   display: grid;

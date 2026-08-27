@@ -36,7 +36,7 @@ try {
          ORDER BY day ASC"
     );
     // Computed in PHP (UTC, matching recorded_at's storage convention) and
-    // bound as a plain timestamp — see readings.php's RANGE_MODIFIERS
+    // bound as a plain timestamp — see readings.php's rangeModifier()
     // comment for why this avoids asking PostgreSQL to parse an interval.
     $since = new DateTimeImmutable('now', new DateTimeZone('UTC'));
     $since = $since->modify('-' . MONTHS_BACK . ' months');
