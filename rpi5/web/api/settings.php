@@ -145,7 +145,7 @@ switch ($action) {
         $password = (string) ($input['password'] ?? '');
         $overviewRange = (string) ($input['overview_range'] ?? '24h');
         $forecastRange = (string) ($input['forecast_range'] ?? '24h');
-        if (mb_strlen(trim($password)) < 4) {
+        if (strlen(trim($password)) < 4) {
             fail(400, 'Password must be at least 4 characters.');
         }
         if (!validRange($overviewRange) || !validRange($forecastRange)) {
