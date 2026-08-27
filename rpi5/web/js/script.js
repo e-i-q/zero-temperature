@@ -3,6 +3,7 @@
   const DAILY_URL = 'api/daily.php';
   const FORECAST_URL = 'api/forecast.php';
   const SETTINGS_URL = 'api/settings.php';
+  const SYNC_TRIGGER_URL = 'api/sync_trigger.php';
   const REFRESH_MS = 60000; // poll for new data every minute
   const FORECAST_REFRESH_MS = REFRESH_MS * 5; // forecast.php itself caches Open-Meteo for 30min
   const RANGE_STORAGE_KEY = 'hiveRange';
@@ -152,20 +153,24 @@
     return res.json();
   }
 
-  // POST helper for api/settings.php — every call is a JSON body carrying
-  // an "action", and the X-Requested-With header is settings.php's cheap
-  // CSRF speed bump (see its docstring). Throws with the server's own
+  // POST helper shared by api/settings.php and api/sync_trigger.php — both
+  // expect a JSON body and the X-Requested-With header as a cheap CSRF speed
+  // bump (see settings.php's docstring). Throws with the server's own
   // {"error": "..."} message on failure, same convention as fetchJson.
-  async function postSettings(action, body) {
-    const res = await fetch(SETTINGS_URL, {
+  async function postJson(url, body) {
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
-      body: JSON.stringify({ action, ...body }),
+      body: JSON.stringify(body),
     });
     let payload = null;
     try { payload = await res.json(); } catch { /* fall through to status-based error below */ }
     if (!res.ok) throw new Error((payload && payload.error) || 'HTTP ' + res.status);
     return payload;
+  }
+
+  function postSettings(action, body) {
+    return postJson(SETTINGS_URL, { action, ...body });
   }
 
   async function loadReadings() {
@@ -177,6 +182,7 @@
       hidden = new Set([...hidden].filter((id) => sensors.some((s) => s.id === id)));
       statusLabel = sensors.some((s) => s.online) ? 'Live' : 'No sensor online';
       renderAll(payload);
+      renderSyncList(); // keep the Settings tab's online/offline badges and IPs current even while it's not the visible tab
     } catch (err) {
       statusLabel = 'Unable to reach the Hive';
       renderStatus();
@@ -881,6 +887,7 @@
     el('settings-profile').hidden = false;
     renderSettingsCurrent();
     renderRangesEditor();
+    renderSyncList();
   }
 
   function showSettingsLoggedOut() {
@@ -1092,6 +1099,75 @@
   // client-side too so an obviously malformed entry doesn't round-trip to
   // the server just to be rejected.
   const RANGE_TOKEN_RE = /^(all|[1-9]\d{0,2}(h|d|w|m))$/;
+
+  // -- Manual sync trigger (per-sensor "Sync Now") -----------------------------
+  // Only meaningful for a Pi Zero that's fallen behind (e.g. taken offline
+  // on battery) — see api/sync_trigger.php and rpi-zero/web/sync.php, which
+  // this actually calls. Shown regardless of online/offline status: the
+  // whole point is usually catching a sensor up right after it comes back.
+  function renderSyncList() {
+    const list = el('sync-list');
+    if (!list) return;
+    list.innerHTML = '';
+    sensors.forEach((s) => {
+      const li = document.createElement('li');
+      li.className = 'sync-item' + (s.online ? '' : ' offline');
+
+      const name = document.createElement('span');
+      name.className = 'sync-item-name';
+      name.textContent = s.name;
+
+      const badge = document.createElement('span');
+      badge.className = 'sync-item-badge';
+      badge.textContent = s.online ? 'ONLINE' : 'OFFLINE';
+
+      const ip = document.createElement('span');
+      ip.className = 'sync-item-ip';
+      ip.textContent = s.ip_address || 'no IP on file';
+
+      const spacer = document.createElement('span');
+      spacer.className = 'sync-item-spacer';
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'sync-item-btn';
+      btn.dataset.sensor = s.name;
+      btn.textContent = 'Sync Now';
+
+      const result = document.createElement('div');
+      result.className = 'sync-item-result';
+      result.hidden = true;
+
+      li.append(name, badge, ip, spacer, btn, result);
+      list.appendChild(li);
+    });
+  }
+
+  el('sync-list').addEventListener('click', async (e) => {
+    const btn = e.target.closest('.sync-item-btn');
+    if (!btn || btn.disabled) return;
+    const sensorName = btn.dataset.sensor;
+    const result = btn.closest('.sync-item').querySelector('.sync-item-result');
+
+    btn.disabled = true;
+    const prevLabel = btn.textContent;
+    btn.textContent = 'Syncing…';
+    result.hidden = true;
+    result.className = 'sync-item-result';
+
+    try {
+      const payload = await postJson(SYNC_TRIGGER_URL, { sensor: sensorName });
+      result.textContent = (payload.ok ? payload.output : (payload.error || payload.output)) || 'Done, no output.';
+      result.classList.add(payload.ok ? 'ok' : 'error');
+    } catch (err) {
+      result.textContent = err.message;
+      result.classList.add('error');
+    } finally {
+      result.hidden = false;
+      btn.disabled = false;
+      btn.textContent = prevLabel;
+    }
+  });
 
   el('ranges-add-form').addEventListener('submit', (e) => {
     e.preventDefault();

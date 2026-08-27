@@ -178,6 +178,14 @@
         </form>
         <p class="settings-error" id="ranges-error" hidden></p>
 
+        <p class="settings-status">Manual sync trigger:</p>
+        <p class="settings-current">
+          Only useful for a Pi Zero that's been offline — asks it to push
+          any local readings not yet in this database. See
+          rpi-zero/web/sync.php.
+        </p>
+        <ul class="sync-list" id="sync-list"></ul>
+
         <button type="button" class="btn btn-secondary" id="settings-logout-btn">Log Out</button>
       </div>
     </div>

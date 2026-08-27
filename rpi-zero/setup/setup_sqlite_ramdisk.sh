@@ -249,7 +249,13 @@ else
 fi
 
 chown "\${RUN_USER}:\${RUN_USER}" "\$DB_RAM_PATH"
-chmod 644 "\$DB_RAM_PATH"
+# 664, not 644: www-data is in \${RUN_USER}'s group (see
+# grant_web_user_access above) and normally only needs read access for
+# readings.php — except when web/sync.php shells out to sync_backlog.py to
+# run a manual backlog sync (see setup_sync_trigger.sh), which writes
+# synced_at as www-data. Group-write makes that work without running the
+# whole web server as \${RUN_USER}.
+chmod 664 "\$DB_RAM_PATH"
 
 # Use DELETE journal mode (SQLite's default), NOT WAL. WAL mode creates
 # -shm/-wal sidecar files that get owned by whichever process opens the DB
@@ -258,8 +264,9 @@ chmod 644 "\$DB_RAM_PATH"
 # can't write the OTHER process's sidecar files, and vice versa. DELETE mode
 # has no persistent sidecar files: each write uses a temporary rollback
 # journal created and removed within the same transaction by whichever
-# process is writing. We only ever have one writer (the logger) and
-# read-only access from PHP, so WAL's concurrency benefit doesn't apply here.
+# process is writing — so \${RUN_USER}'s cron-triggered logger and an
+# occasional www-data-run sync_backlog.py can both write (never truly
+# concurrently in practice) without fighting over a shared sidecar file.
 sudo -u "\$RUN_USER" sqlite3 "\$DB_RAM_PATH" "PRAGMA journal_mode=DELETE; PRAGMA synchronous=NORMAL;" >/dev/null
 
 echo "[\$TS] Restore complete: \$(du -sh "\$DB_RAM_PATH" | awk '{print \$1}')" | tee -a "\$LOG"
@@ -385,11 +392,17 @@ CREATE TABLE IF NOT EXISTS readings (
   sensor TEXT NOT NULL,
   temperature_c REAL NOT NULL,
   humidity_pct REAL NOT NULL,
-  sample_count INTEGER NOT NULL
+  sample_count INTEGER NOT NULL,
+  synced_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_readings_recorded_at ON readings(recorded_at);
+CREATE TABLE IF NOT EXISTS sync_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  last_remote_ok INTEGER NOT NULL DEFAULT 0
+);
+INSERT OR IGNORE INTO sync_state (id, last_remote_ok) VALUES (1, 0);
 SQL
-  success "Example table 'readings' ready"
+  success "Example table 'readings' ready (dht22_logger.py's ensure_schema() also self-migrates these on an older DB — see rpi-zero/python/sync_backlog.py)"
 }
 
 # ── Restart PHP-FPM so new group membership takes effect ─────────────────────

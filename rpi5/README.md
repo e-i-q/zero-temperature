@@ -31,8 +31,10 @@ PostgreSQL (Hive, this Pi)  →  api/readings.php, api/daily.php  →  dashboard
 | `web/api/daily.php` | JSON API: 12 months of daily mean/min/max temperature per sensor, aggregated in PostgreSQL |
 | `web/api/forecast.php` | JSON API: Open-Meteo hourly forecast (temperature/humidity/wind/condition) for the Forecast tab. No database — a cached proxy, same pattern as `../rpi-zero/web/weather.php` |
 | `web/api/settings.php` | JSON API backing the Settings tab: password-profile login/create/save/logout, session-cookie-backed. See its docstring |
+| `web/api/sync_trigger.php` | JSON API backing the Settings tab's "Sync Now" buttons: relays a manual backlog-sync request to a specific Pi Zero's `web/sync.php`. See its docstring |
 | `setup/setup_nginx_php.sh` | Installs and configures nginx + PHP-FPM (with `pdo_pgsql`) |
 | `setup/deploy_web.sh` | Syncs `web/` into the nginx web root |
+| `setup/setup_sync_trigger.sh` | Provisions the shared secret used to authenticate `sync_trigger.php`'s requests to each Pi Zero |
 | `setup/lib/log.sh` | Shared colored logging + quiet-by-default install output for the scripts above |
 
 ## Setup (Raspberry Pi 5)
@@ -122,3 +124,13 @@ After setup, the dashboard is served at `http://<pi5-address>/`.
   same set. `readings.php`/`forecast.php` parse the token shape generally
   rather than matching a hardcoded list, to accept whatever a profile has
   defined.
+- **Settings tab — manual sync trigger**: logged in, the Settings tab also
+  lists every registered sensor with a "Sync Now" button. Clicking one asks
+  `api/sync_trigger.php` to relay a request to that Pi Zero's own
+  `web/sync.php`, which runs `sync_backlog.py` there and reports the result
+  — see `../rpi-zero/README.md`'s "Offline backlog sync" section for why
+  this has to be a relay rather than something the Hive can do on its own.
+  Requires `setup/setup_sync_trigger.sh` to have been run here AND
+  `rpi-zero/setup/setup_sync_trigger.sh` on each Pi Zero you want this to
+  work for, sharing one token across the fleet. A sensor with no
+  `sensors.ip_address` on file yet falls back to `<name>.local` (mDNS).

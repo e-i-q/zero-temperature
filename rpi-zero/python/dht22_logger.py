@@ -18,30 +18,35 @@ Requires:
     adafruit-circuitpython-dht is the maintained replacement.)
 
     pip3 install psycopg2-binary --break-system-packages
-    (needed for the remote PostgreSQL mirror; see PG_* config below)
+    (needed for the remote PostgreSQL mirror; see remote_db.py)
 
 Remote DB:
     In addition to the local SQLite file, each reading is mirrored to a
-    PostgreSQL database on another RPi (see PG_* constants below). That
-    database's `readings.sensor_id` column references a `sensors` table
-    (id, name, description). This script registers itself there under its
-    hostname (`uname -n`) lazily: it only checks/creates the `sensors` row
-    the first time the plain insert into `readings` fails (e.g. because the
-    hostname isn't registered yet), instead of querying on every run.
-    The remote write is best-effort — if 192.168.0.67 is unreachable, a
-    warning is printed to stderr but the script still exits 0 as long as
-    the local SQLite write succeeded.
+    PostgreSQL database on another RPi — see remote_db.py for connection
+    config and auth. That database's `readings.sensor_id` column references
+    a `sensors` table (id, name, description, ip_address). This script
+    (re)registers itself there under its hostname (`uname -n`) on every
+    successful connection, not just the first time — that also keeps
+    `sensors.ip_address` current, which the Hive dashboard's Settings tab
+    relies on to reach this Pi for a manual sync trigger (see
+    rpi5/web/api/sync_trigger.php and web/sync.php). The remote write is
+    best-effort — if the remote host is unreachable, a warning is printed to
+    stderr but the script still exits 0 as long as the local SQLite write
+    succeeded.
 
-    Auth: no password is passed in code or read from the environment —
-    psycopg2 (via libpq) picks it up from RUN_USER's ~/.pgpass. That file
-    must exist and be chmod 600, with a line of the form:
-        192.168.0.67:5432:sensors:sensor_writer:<password>
-    If it's missing or unreadable, the connection just fails and is
-    treated like any other unreachable-remote-DB warning.
+Offline backlog sync:
+    Every local row gets a `synced_at` column, NULL until its remote mirror
+    is confirmed. A `sync_state` table remembers whether the *previous* run
+    managed to reach the remote DB. When a run's own mirror succeeds right
+    after a run where it didn't, that's an offline→online transition, and
+    this script fires sync_backlog.sync_backlog() once to push everything
+    else still marked unsynced (e.g. a whole trip's worth of readings taken
+    with no connectivity). Otherwise the backlog sync never runs — not on a
+    timer, not on every reading — so there's no added cost while offline or
+    once everything is already caught up. See sync_backlog.py.
 """
 
 import argparse
-import os
 import sqlite3
 import sys
 import time
@@ -50,6 +55,9 @@ from pathlib import Path
 import board
 import adafruit_dht
 import psycopg2
+import local_db
+import remote_db
+import sync_backlog
 dht_device = adafruit_dht.DHT22(board.D2)  # D2 = GPIO2
 
 # ── Configuration ──────────────────────────────────────────────────────────
@@ -59,15 +67,6 @@ DEFAULT_MAX_ATTEMPTS = 50   # Number of max iterations before reaching samples c
 DEFAULT_DELAY = 2.5         # Seconds between readings (DHT22 needs >= 2s)
 DEFAULT_DB_PATH = "/mnt/sqlite_ram/sensors.db"
 DEFAULT_SENSOR_NAME = "dht22"
-
-# ── Remote PostgreSQL configuration ────────────────────────────────────────
-PG_HOST = "192.168.0.67"
-PG_PORT = 5432              # standard PostgreSQL port
-PG_USER = "sensor_writer"
-PG_DBNAME = "sensors"
-# Password is NOT stored here or read from the environment — it comes from
-# RUN_USER's ~/.pgpass (chmod 600), which psycopg2/libpq consult automatically
-# when no password= is passed to connect(). See docstring above.
 
 
 def read_samples(pin, samples, delay, max_attempts):
@@ -91,25 +90,6 @@ def average(values: list[float]) -> float:
     return sum(values) / len(values)
 
 
-def ensure_schema(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS readings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            recorded_at TEXT NOT NULL,
-            sensor TEXT NOT NULL,
-            temperature_c REAL NOT NULL,
-            humidity_pct REAL NOT NULL,
-            sample_count INTEGER NOT NULL
-        )
-        """
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_readings_recorded_at ON readings(recorded_at)"
-    )
-    conn.commit()
-
-
 def store_reading(
     db_path: str,
     timestamp: str,
@@ -117,11 +97,11 @@ def store_reading(
     temperature_c: float,
     humidity_pct: float,
     sample_count: int,
-) -> None:
+) -> int:
     conn = sqlite3.connect(db_path)
     try:
-        ensure_schema(conn)
-        conn.execute(
+        local_db.ensure_schema(conn)
+        cur = conn.execute(
             """
             INSERT INTO readings (recorded_at, sensor, temperature_c, humidity_pct, sample_count)
             VALUES (?, ?, ?, ?, ?)
@@ -129,29 +109,12 @@ def store_reading(
             (timestamp, sensor_name, round(temperature_c, 2), round(humidity_pct, 2), sample_count),
         )
         conn.commit()
+        row_id = cur.lastrowid
     finally:
         conn.close()
 
     print(f"Stored: {timestamp}  {temperature_c:.2f}°C  {humidity_pct:.2f}%  (n={sample_count}) → {db_path}")
-
-
-def local_hostname() -> str:
-    """Equivalent of `uname -n` — used as this RPi's name in the remote `sensors` table."""
-    return os.uname().nodename
-
-
-def register_sensor(conn, hostname: str) -> None:
-    """Add `hostname` to the remote `sensors` table if it isn't there yet."""
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO sensors (name, description)
-            VALUES (%s, %s)
-            ON CONFLICT (name) DO NOTHING
-            """,
-            (hostname, f"Auto-registered by dht22_logger.py on {hostname}"),
-        )
-    conn.commit()
+    return row_id
 
 
 def store_reading_remote(
@@ -160,9 +123,12 @@ def store_reading_remote(
     temperature_c: float,
     humidity_pct: float,
     sample_count: int,
-) -> None:
+) -> bool:
     """Mirror a reading to the remote PostgreSQL DB. Best-effort: any failure
-    (unreachable host, auth error, ...) is logged as a warning, not raised."""
+    (unreachable host, auth error, ...) is logged as a warning, not raised.
+    Returns whether the row is confirmed on the remote DB — the caller uses
+    this (via sync_state) to detect an offline→online transition and trigger
+    sync_backlog.sync_backlog() for anything missed while disconnected."""
     insert_sql = """
         INSERT INTO readings (recorded_at, sensor_id, temperature_c, humidity_pct, sample_count)
         VALUES (%s, (SELECT id FROM sensors WHERE name = %s), %s, %s, %s)
@@ -170,32 +136,26 @@ def store_reading_remote(
     params = (timestamp, hostname, round(temperature_c, 2), round(humidity_pct, 2), sample_count)
 
     try:
-        # No password= here on purpose — libpq reads it from ~/.pgpass so it
-        # never has to sit in code, cron, or the environment. See docstring.
-        conn = psycopg2.connect(
-            host=PG_HOST, port=PG_PORT, user=PG_USER, dbname=PG_DBNAME,
-        )
+        conn = remote_db.connect()
     except psycopg2.OperationalError as e:
-        print(f"WARNING: could not connect to remote DB at {PG_HOST}:{PG_PORT}: {e}", file=sys.stderr)
-        return
+        print(f"WARNING: could not connect to remote DB at {remote_db.PG_HOST}:{remote_db.PG_PORT}: {e}", file=sys.stderr)
+        return False
 
     try:
-        try:
-            with conn.cursor() as cur:
-                cur.execute(insert_sql, params)
-            conn.commit()
-        except psycopg2.Error:
-            # Insert failed — most likely because `hostname` isn't registered
-            # in `sensors` yet, so the subquery returned NULL and violated
-            # the NOT NULL constraint on sensor_id. Register it and retry once.
-            conn.rollback()
-            register_sensor(conn, hostname)
-            with conn.cursor() as cur:
-                cur.execute(insert_sql, params)
-            conn.commit()
-        print(f"Stored: {timestamp}  {temperature_c:.2f}°C  {humidity_pct:.2f}%  (n={sample_count}) → {PG_HOST}/{PG_DBNAME}")
+        # Register/refresh up front (see remote_db.register_sensor's
+        # docstring) so this Pi's `sensors` row — including its ip_address —
+        # is guaranteed to exist and be current before the insert below,
+        # rather than only fixing it up reactively on a failed insert.
+        remote_db.register_sensor(conn, hostname, remote_db.local_ip())
+        with conn.cursor() as cur:
+            cur.execute(insert_sql, params)
+        conn.commit()
+        print(f"Stored: {timestamp}  {temperature_c:.2f}°C  {humidity_pct:.2f}%  (n={sample_count}) → {remote_db.PG_HOST}/{remote_db.PG_DBNAME}")
+        return True
     except psycopg2.Error as e:
+        conn.rollback()
         print(f"WARNING: remote DB write failed: {e}", file=sys.stderr)
+        return False
     finally:
         conn.close()
 
@@ -237,8 +197,20 @@ def main() -> int:
 
     timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
-    store_reading(str(db_path), timestamp, args.sensor_name, avg_temp, avg_hum, success_count)
-    store_reading_remote(local_hostname(), timestamp, avg_temp, avg_hum, success_count)
+    row_id = store_reading(str(db_path), timestamp, args.sensor_name, avg_temp, avg_hum, success_count)
+
+    hostname = remote_db.local_hostname()
+    was_offline = not local_db.get_last_remote_ok(str(db_path))
+    remote_ok = store_reading_remote(hostname, timestamp, avg_temp, avg_hum, success_count)
+    local_db.set_last_remote_ok(str(db_path), remote_ok)
+
+    if remote_ok:
+        local_db.mark_synced(str(db_path), row_id, timestamp)
+        if was_offline:
+            # Previous run couldn't reach the remote DB, this one just did —
+            # push everything else that piled up locally while disconnected.
+            print("Remote connection restored — syncing backlog of readings taken while offline…")
+            sync_backlog.sync_backlog(str(db_path), hostname)
 
     return 0
 

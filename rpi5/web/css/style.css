@@ -347,6 +347,73 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
 
 .ranges-input { flex: 1 1 120px; max-width: 160px; }
 
+.sync-list {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sync-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--color-divider-strong);
+  background: var(--color-bg);
+  padding: 7px 8px 7px 10px;
+  flex-wrap: wrap;
+}
+
+.sync-item-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.sync-item-ip {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.sync-item-badge {
+  font: 400 9px var(--font-mono);
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border: 1px solid var(--status-good-text);
+  color: var(--status-good-text);
+  flex: none;
+}
+.sync-item.offline .sync-item-badge { border-color: var(--color-divider-strong); color: var(--color-text-muted); }
+
+.sync-item-spacer { flex: 1; }
+
+.sync-item-btn {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 5px 10px;
+  border: 1px solid var(--color-divider-strong);
+  background: none;
+  color: var(--color-text);
+  cursor: pointer;
+  flex: none;
+}
+.sync-item-btn:hover:not(:disabled) { background: var(--color-surface); }
+.sync-item-btn:disabled { opacity: 0.5; cursor: default; }
+
+.sync-item-result {
+  flex-basis: 100%;
+  font: 400 11px var(--font-mono);
+  white-space: pre-wrap;
+  color: var(--color-text-muted);
+}
+.sync-item-result.error { color: var(--series-8); }
+.sync-item-result.ok { color: var(--status-good-text); }
+
 /* -- Sensor tiles ----------------------------------------------------------- */
 .tile-grid {
   display: grid;
