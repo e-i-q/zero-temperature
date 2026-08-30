@@ -191,6 +191,13 @@
       statusLabel = sensors.some((s) => s.online) ? 'Live' : 'No sensor online';
       renderAll(payload);
       renderSyncList(); // keep the Settings tab's online/offline badges and IPs current even while it's not the visible tab
+      // A returning, already-logged-in browser calls showSettingsLoggedIn()
+      // (and so renderLabelList()) before this first load ever resolves, so
+      // that first render sees an empty `sensors` array and produces an
+      // empty list. Fill it in once real data shows up — but only while
+      // still empty, so this never wipes out someone's in-progress edit on
+      // a later 60s poll.
+      if (settingsLoggedIn && el('label-list').children.length === 0) renderLabelList();
     } catch (err) {
       statusLabel = 'Unable to reach the Hive';
       renderStatus();
