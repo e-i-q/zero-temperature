@@ -57,7 +57,17 @@
  *   {"action": "create", "password": "...", "overview_range": "24h", "forecast_range": "24h"}
  *   {"action": "save",   "overview_range": "24h", "forecast_range": "24h"}
  *   {"action": "save_ranges", "ranges": ["6h", "12h", "24h", "2d", "5d", "1w", "1m"]}
+ *   {"action": "save_sensor_label", "sensor": "dht22-01", "label": "Kitchen"}
  *   {"action": "logout"}
+ *
+ * `save_sensor_label` sets sensors.label (see
+ * ../../../../db/database/sensors/tables/sensors.md) — the Overview tab
+ * shows it in place of a sensor's `name`, `name` still visible in the
+ * background. Not tied to a particular profile (there's only ever one
+ * `sensors` registry, same as the "Sync Now" list below) — just gated
+ * behind being logged into *some* profile, like sync_trigger.php. An empty
+ * string clears the label back to NULL, reverting the Overview tab to
+ * showing `name` as its only display.
  *
  * All responses are JSON. Errors use db.php's fail() shape ({"error": "..."}),
  * the same convention script.js's fetchJson() already expects from every
@@ -68,6 +78,7 @@ declare(strict_types=1);
 
 const SESSION_LIFETIME_DAYS = 60;
 const MAX_RANGES = 12; // sane ceiling on how many chips one profile can pile up
+const MAX_LABEL_LEN = 40; // sane ceiling on a sensor label's length (fits a tile's watermark)
 
 // Keep the server-side session file alive as long as the cookie claims it
 // is. Only fixes GC triggered by this request (gc_probability, which
@@ -301,6 +312,32 @@ switch ($action) {
             'ok'       => true,
             'settings' => ['ranges' => $clean, 'overview_range' => $overviewRange, 'forecast_range' => $forecastRange],
         ]);
+        break;
+    }
+
+    case 'save_sensor_label': {
+        $passwordId = $_SESSION['password_id'] ?? null;
+        if (!$passwordId) {
+            fail(401, 'Not logged in.');
+        }
+        $sensorName = (string) ($input['sensor'] ?? '');
+        if ($sensorName === '') {
+            fail(400, 'sensor is required.');
+        }
+        $label = trim((string) ($input['label'] ?? ''));
+        if (strlen($label) > MAX_LABEL_LEN) {
+            fail(400, "Label must be at most " . MAX_LABEL_LEN . " characters.");
+        }
+        // Empty string clears the label back to NULL rather than storing "".
+        $stmt = $pdo->prepare('UPDATE sensors SET label = :label WHERE name = :name');
+        $stmt->execute([
+            'label' => $label === '' ? null : $label,
+            'name'  => $sensorName,
+        ]);
+        if ($stmt->rowCount() === 0) {
+            fail(404, "Unknown sensor: {$sensorName}");
+        }
+        echo json_encode(['ok' => true, 'sensor' => $sensorName, 'label' => $label === '' ? null : $label]);
         break;
     }
 

@@ -414,6 +414,61 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
 .sync-item-result.error { color: var(--series-8); }
 .sync-item-result.ok { color: var(--status-good-text); }
 
+.label-list {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.label-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--color-divider-strong);
+  background: var(--color-bg);
+  padding: 7px 8px 7px 10px;
+  flex-wrap: wrap;
+}
+
+.label-item-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text-muted);
+  flex: none;
+}
+
+.label-item-input {
+  flex: 1 1 140px;
+  min-width: 100px;
+}
+
+.label-item-btn {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 5px 10px;
+  border: 1px solid var(--color-divider-strong);
+  background: none;
+  color: var(--color-text);
+  cursor: pointer;
+  flex: none;
+}
+.label-item-btn:hover:not(:disabled) { background: var(--color-surface); }
+.label-item-btn:disabled { opacity: 0.5; cursor: default; }
+
+.label-item-result {
+  flex-basis: 100%;
+  font: 400 11px var(--font-mono);
+  color: var(--color-text-muted);
+}
+.label-item-result.error { color: var(--series-8); }
+.label-item-result.ok { color: var(--status-good-text); }
+
 /* -- Sensor tiles ----------------------------------------------------------- */
 .tile-grid {
   display: grid;
@@ -432,14 +487,44 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
   gap: 8px;
 }
 
-.tile-name {
-  font: 400 9.5px var(--font-mono);
-  letter-spacing: 0.08em;
+/* Primary tile heading: the sensor's label if it has one, its device name
+   otherwise (see renderTiles() in script.js) — this is the "main visible
+   thing" the labeling feature is for. */
+.tile-label {
+  font: 600 13px var(--font-heading);
+  letter-spacing: 0.02em;
   text-transform: uppercase;
-  color: var(--color-text-muted);
+  color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Device name, watermarked behind the whole tile — a faded diagonal stamp,
+   only rendered when a label is actually standing in for it in .tile-label
+   above (see renderTiles()). Negative z-index (on the stacking context
+   .card/.chart-card/.tile already establishes) puts it behind the tile's
+   in-flow content without needing `overflow: hidden` on .tile itself, which
+   would otherwise clip the corner ticks (.corner, deliberately positioned a
+   few px outside the tile's own box). `color-divider-strong` is already the
+   faintest token in the palette (meant for hairlines, not text) — exactly
+   the "barely there" weight a background watermark wants. */
+.tile-name-bg {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 0 8px;
+  font: 600 22px var(--font-heading);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--color-divider-strong);
+  transform: rotate(-6deg);
+  pointer-events: none;
 }
 
 .tile-badge {

@@ -38,7 +38,7 @@
   ];
 
   let currentRange = localStorage.getItem(RANGE_STORAGE_KEY) || '24h';
-  let sensors = [];        // [{id, name, description, online, latest, stats}]
+  let sensors = [];        // [{id, name, description, label, online, latest, stats}]
   let series = {};         // { sensorId: [{recorded_at, temperature_c, humidity_pct, sample_count}] }
   let dailySeries = {};    // { sensorId: [{day, temp_avg, temp_min, temp_max}] }
   let hidden = new Set();  // sensor ids toggled off via the legend
@@ -107,6 +107,14 @@
     const hours = Math.round(mins / 60);
     if (hours < 24) return hours + 'h ago';
     return Math.round(hours / 24) + 'd ago';
+  }
+
+  // A sensor's label (set from the Settings tab, see api/settings.php's
+  // save_sensor_label) stands in for its device `name` wherever the
+  // dashboard shows sensor identity — falls back to `name` for a sensor
+  // that's never been given one.
+  function displayName(s) {
+    return (s.label && s.label.trim()) ? s.label : s.name;
   }
 
   function colorFor(sensorId) {
@@ -349,7 +357,8 @@
       swatch.className = 'legend-swatch';
       swatch.style.background = colorFor(s.id);
       const label = document.createElement('span');
-      label.textContent = s.name; // sensor names come from the DB — textContent, never innerHTML
+      label.textContent = displayName(s); // from the DB — textContent, never innerHTML
+      if (s.label && s.label.trim()) item.title = s.name; // device name, on hover, when a label is standing in for it
       item.append(swatch, label);
       item.addEventListener('click', () => {
         if (hidden.has(s.id)) hidden.delete(s.id); else hidden.add(s.id);
@@ -372,14 +381,24 @@
 
       const head = document.createElement('div');
       head.className = 'tile-head';
-      const name = document.createElement('span');
-      name.className = 'tile-name';
-      name.textContent = s.name;
+      const label = document.createElement('span');
+      label.className = 'tile-label';
+      label.textContent = displayName(s);
       const badge = document.createElement('span');
       badge.className = 'tile-badge';
       badge.textContent = s.online ? 'OK' : 'OFFLINE';
-      head.append(name, badge);
+      head.append(label, badge);
       tile.appendChild(head);
+
+      // Device name, watermarked into the background — only when a label is
+      // actually standing in for it above; otherwise tile-label already
+      // shows the device name and a second copy would be redundant.
+      if (s.label && s.label.trim()) {
+        const nameBg = document.createElement('span');
+        nameBg.className = 'tile-name-bg';
+        nameBg.textContent = s.name;
+        tile.appendChild(nameBg);
+      }
 
       const value = document.createElement('div');
       value.className = 'tile-value';
@@ -459,7 +478,8 @@
       sw.className = 'legend-swatch';
       sw.style.background = colorFor(sensor.id);
       const nameSpan = document.createElement('span');
-      nameSpan.textContent = sensor.name;
+      nameSpan.textContent = displayName(sensor);
+      if (sensor.label && sensor.label.trim()) nameSpan.title = sensor.name;
       tdSensor.append(sw, nameSpan);
       const tdTemp = document.createElement('td');
       tdTemp.textContent = point.temperature_c.toFixed(1);
@@ -843,7 +863,8 @@
       val.textContent = `${point.temperature_c.toFixed(1)}°C / ${point.humidity_pct.toFixed(0)}%`;
       const name = document.createElement('span');
       name.className = 'tooltip-name';
-      name.textContent = sensor.name;
+      name.textContent = displayName(sensor);
+      if (sensor.label && sensor.label.trim()) name.title = sensor.name;
       row.append(key, val, name);
       rowsBox.appendChild(row);
     }
@@ -887,6 +908,7 @@
     el('settings-profile').hidden = false;
     renderSettingsCurrent();
     renderRangesEditor();
+    renderLabelList();
     renderSyncList();
   }
 
@@ -1099,6 +1121,92 @@
   // client-side too so an obviously malformed entry doesn't round-trip to
   // the server just to be rejected.
   const RANGE_TOKEN_RE = /^(all|[1-9]\d{0,2}(h|d|w|m))$/;
+
+  // -- Sensor labels (per-sensor friendly name, shown on Overview) ------------
+  // Only shown logged in, same as the ranges editor and sync list below — a
+  // label is global to the sensors registry (not per-profile), just gated
+  // behind being logged into *some* profile. Not rebuilt on every
+  // loadReadings() poll (unlike renderSyncList()) so an in-progress edit in
+  // one of these inputs is never clobbered out from under someone typing.
+  function renderLabelList() {
+    const list = el('label-list');
+    if (!list) return;
+    list.innerHTML = '';
+    sensors.forEach((s) => {
+      const li = document.createElement('li');
+      li.className = 'label-item';
+
+      const name = document.createElement('span');
+      name.className = 'label-item-name';
+      name.textContent = s.name;
+
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'settings-input label-item-input';
+      input.maxLength = 40;
+      input.placeholder = 'e.g. Kitchen';
+      input.value = s.label || '';
+      input.dataset.sensor = s.name;
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'label-item-btn';
+      btn.textContent = 'Save';
+
+      const result = document.createElement('div');
+      result.className = 'label-item-result';
+      result.hidden = true;
+
+      li.append(name, input, btn, result);
+      list.appendChild(li);
+    });
+  }
+
+  async function saveSensorLabel(li) {
+    const input = li.querySelector('.label-item-input');
+    const btn = li.querySelector('.label-item-btn');
+    const result = li.querySelector('.label-item-result');
+    const sensorName = input.dataset.sensor;
+    const label = input.value.trim();
+
+    btn.disabled = true;
+    result.hidden = true;
+    result.className = 'label-item-result';
+    try {
+      const payload = await postSettings('save_sensor_label', { sensor: sensorName, label });
+      // Reflect the saved value into local state and every place on Overview
+      // that shows sensor identity, without waiting for the next poll.
+      const s = sensors.find((x) => x.name === sensorName);
+      if (s) s.label = payload.label;
+      input.value = payload.label || '';
+      result.textContent = payload.label ? `Saved — Overview now shows "${payload.label}".` : 'Saved — Overview shows the device name again.';
+      result.classList.add('ok');
+      renderLegend();
+      renderTiles();
+      drawTable();
+    } catch (err) {
+      result.textContent = err.message;
+      result.classList.add('error');
+    } finally {
+      result.hidden = false;
+      btn.disabled = false;
+    }
+  }
+
+  el('label-list').addEventListener('click', (e) => {
+    const btn = e.target.closest('.label-item-btn');
+    if (!btn || btn.disabled) return;
+    saveSensorLabel(btn.closest('.label-item'));
+  });
+
+  // Enter in a label input saves it too, without needing to reach for the button.
+  el('label-list').addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    const input = e.target.closest('.label-item-input');
+    if (!input) return;
+    e.preventDefault();
+    saveSensorLabel(input.closest('.label-item'));
+  });
 
   // -- Manual sync trigger (per-sensor "Sync Now") -----------------------------
   // Only meaningful for a Pi Zero that's fallen behind (e.g. taken offline
