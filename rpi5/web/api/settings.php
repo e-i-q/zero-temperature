@@ -40,7 +40,16 @@
  *
  * Session: a PHP session cookie remembers which password_id is "logged in"
  * for this browser, for SESSION_LIFETIME_DAYS days, so the password only
- * has to be re-entered occasionally rather than on every visit.
+ * has to be re-entered occasionally rather than on every visit. That cookie
+ * lifetime is only half the story — the server also has to keep the session
+ * *file* around that long, or the browser presents a still-valid cookie for
+ * a session PHP has already garbage-collected. session.gc_maxlifetime is
+ * ini_set() below to match, but Debian/Ubuntu's default php.ini also sets
+ * session.gc_probability = 0 and delegates GC to the phpsessionclean
+ * systemd timer, which runs every 30 minutes and reads gc_maxlifetime from
+ * php.ini/conf.d directly — a runtime ini_set() here can't reach it. See
+ * setup/setup_nginx_php.sh's configure_php_session_lifetime(), which drops
+ * a conf.d override so that timer agrees with SESSION_LIFETIME_DAYS too.
  *
  * Everything comes in as a JSON POST body (no other query params):
  *   {"action": "status"}
@@ -59,6 +68,13 @@ declare(strict_types=1);
 
 const SESSION_LIFETIME_DAYS = 60;
 const MAX_RANGES = 12; // sane ceiling on how many chips one profile can pile up
+
+// Keep the server-side session file alive as long as the cookie claims it
+// is. Only fixes GC triggered by this request (gc_probability, which
+// Debian/Ubuntu ships as 0 anyway) — the periodic systemd timer that
+// actually deletes stale session files reads php.ini directly, see the
+// docstring above and setup/setup_nginx_php.sh.
+ini_set('session.gc_maxlifetime', (string) (SESSION_LIFETIME_DAYS * 86400));
 
 session_set_cookie_params([
     'lifetime' => SESSION_LIFETIME_DAYS * 86400,

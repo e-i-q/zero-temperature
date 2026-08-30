@@ -126,6 +126,37 @@ verify_pgsql_extension() {
   fi
 }
 
+# Debian/Ubuntu's default php.ini sets session.gc_maxlifetime to 1440s (24
+# min) and session.gc_probability to 0 — per-request GC never runs, and
+# cleanup is delegated instead to the phpsessionclean systemd timer, which
+# sweeps every SAPI's session.save_path every 30 minutes and deletes any
+# session file untouched for longer than *that SAPI's* gc_maxlifetime.
+# web/api/settings.php's login cookie is meant to last SESSION_LIFETIME_DAYS
+# (60 days), but without this override the session file backing it gets
+# swept within ~30-54 minutes, silently logging the dashboard out. Dropping
+# a conf.d override on every installed SAPI (cli, fpm, ...) makes that timer
+# agree with the cookie. Keep the value here in sync with
+# SESSION_LIFETIME_DAYS in web/api/settings.php.
+configure_php_session_lifetime() {
+  info "Extending PHP's session garbage-collection lifetime to match the login cookie…"
+
+  local seconds=$((60 * 86400)) # 60 days — matches SESSION_LIFETIME_DAYS
+  local wrote_any=0
+
+  for ini_dir in /etc/php/*/*/conf.d; do
+    [[ -d "$ini_dir" ]] || continue
+    echo "session.gc_maxlifetime = ${seconds}" > "${ini_dir}/99-session-lifetime.ini"
+    wrote_any=1
+  done
+
+  if [[ "$wrote_any" -eq 1 ]]; then
+    success "session.gc_maxlifetime set to ${seconds}s (60 days) for all PHP SAPIs"
+  else
+    warn "No /etc/php/*/*/conf.d directories found — could not set session.gc_maxlifetime."
+    warn "Set it by hand in php.ini for every SAPI (cli and fpm) and restart php-fpm."
+  fi
+}
+
 # Writes/updates RUN_USER's ~/.pgpass with the line the dashboard's API
 # endpoints need to authenticate, using the password prompt_for_password()
 # collected. Idempotent: re-running with a new password replaces the old
@@ -320,6 +351,7 @@ main() {
   install_nginx
   install_php
   verify_pgsql_extension
+  configure_php_session_lifetime
 
   setup_web_root
   configure_nginx_site
