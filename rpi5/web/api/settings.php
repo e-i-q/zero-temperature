@@ -14,7 +14,7 @@
  * never logs in just keeps using their browser's own localStorage and the
  * fixed default chip set, exactly as before this feature existed.
  *
- * A profile stores two things:
+ * A profile stores three things:
  *   - `ranges`: the ordered, user-editable set of time-span chips offered on
  *     BOTH the Overview and Forecast tabs (they're the same list — those two
  *     tabs have always shown identical chip sets, just interpreted
@@ -26,6 +26,14 @@
  *   - `overview_range`/`forecast_range`: which one of those chips is
  *     currently active, independently per tab (unchanged from before this
  *     tab supported editing the list itself).
+ *   - `sensor_labels`: this profile's own friendly names for sensors
+ *     ("Kitchen", "Bedroom", "Garage", ...), shown on the Overview tab in
+ *     place of a sensor's device `name` (which stays visible too, faded
+ *     into the background of that sensor's tile). Deliberately stored per
+ *     profile rather than as a column on `sensors` itself — two people
+ *     sharing one Hive may want to call the same sensor something
+ *     different — see ../../../../db/database/sensors/tables/settings.md
+ *     for the on-disk encoding.
  *
  * Known, accepted simplifications (fine at this project's scale, revisit if
  * that ever changes):
@@ -60,14 +68,13 @@
  *   {"action": "save_sensor_label", "sensor": "dht22-01", "label": "Kitchen"}
  *   {"action": "logout"}
  *
- * `save_sensor_label` sets sensors.label (see
- * ../../../../db/database/sensors/tables/sensors.md) — the Overview tab
- * shows it in place of a sensor's `name`, `name` still visible in the
- * background. Not tied to a particular profile (there's only ever one
- * `sensors` registry, same as the "Sync Now" list below) — just gated
- * behind being logged into *some* profile, like sync_trigger.php. An empty
- * string clears the label back to NULL, reverting the Overview tab to
- * showing `name` as its only display.
+ * `save_sensor_label` sets one entry of the logged-in profile's own
+ * `settings.sensor_labels` map (see
+ * ../../../../db/database/sensors/tables/settings.md) — private to that
+ * profile, unlike the "Sync Now" list below which lists the one shared
+ * `sensors` registry. An empty string removes the entry, reverting the
+ * Overview tab to showing `name` as its only display for that sensor, for
+ * that profile.
  *
  * All responses are JSON. Errors use db.php's fail() shape ({"error": "..."}),
  * the same convention script.js's fetchJson() already expects from every
@@ -119,13 +126,41 @@ function validRangeToken($v): bool {
     return is_string($v) && ($v === 'all' || preg_match('/^[1-9]\d{0,2}(h|d|w|m)$/', $v) === 1);
 }
 
+// `sensor_labels` on-disk shape: comma-separated `sensor:label` pairs, each
+// side rawurlencode()'d so a label containing a comma or colon (or a
+// sensor name that somehow did) can't corrupt the encoding or get
+// misparsed as a delimiter. See
+// ../../../../db/database/sensors/tables/settings.md.
+function decodeLabels(?string $stored): array {
+    if ($stored === null || $stored === '') {
+        return [];
+    }
+    $labels = [];
+    foreach (explode(',', $stored) as $pair) {
+        $parts = explode(':', $pair, 2);
+        if (count($parts) !== 2) {
+            continue; // malformed entry — skip rather than fail the whole profile
+        }
+        $labels[rawurldecode($parts[0])] = rawurldecode($parts[1]);
+    }
+    return $labels;
+}
+
+function encodeLabels(array $labels): string {
+    $parts = [];
+    foreach ($labels as $sensor => $label) {
+        $parts[] = rawurlencode((string) $sensor) . ':' . rawurlencode((string) $label);
+    }
+    return implode(',', $parts);
+}
+
 // Reads a profile's settings row, normalizing a NULL/empty `ranges` column
 // (either a pre-existing profile from before this column existed, or one
 // that's never customized its list) to the default set. Returns `ranges` as
-// an array — everywhere else in this file works with the list, not the
-// stored comma string.
+// an array and `labels` as a [sensor name => label] map — everywhere else in
+// this file works with those, not the stored comma strings.
 function currentSettings(PDO $pdo, int $passwordId): ?array {
-    $stmt = $pdo->prepare('SELECT overview_range, forecast_range, ranges FROM settings WHERE password_id = :id');
+    $stmt = $pdo->prepare('SELECT overview_range, forecast_range, ranges, sensor_labels FROM settings WHERE password_id = :id');
     $stmt->bindValue(':id', $passwordId, PDO::PARAM_INT);
     $stmt->execute();
     $row = $stmt->fetch();
@@ -137,6 +172,7 @@ function currentSettings(PDO $pdo, int $passwordId): ?array {
         'overview_range' => $row['overview_range'],
         'forecast_range' => $row['forecast_range'],
         'ranges'         => explode(',', $rangesStr),
+        'labels'         => decodeLabels($row['sensor_labels']),
     ];
 }
 
@@ -234,7 +270,7 @@ switch ($action) {
         $_SESSION['password_id'] = $newId;
         echo json_encode([
             'ok'       => true,
-            'settings' => ['overview_range' => $overviewRange, 'forecast_range' => $forecastRange, 'ranges' => DEFAULT_RANGES],
+            'settings' => ['overview_range' => $overviewRange, 'forecast_range' => $forecastRange, 'ranges' => DEFAULT_RANGES, 'labels' => []],
         ]);
         break;
     }
@@ -310,7 +346,7 @@ switch ($action) {
         ]);
         echo json_encode([
             'ok'       => true,
-            'settings' => ['ranges' => $clean, 'overview_range' => $overviewRange, 'forecast_range' => $forecastRange],
+            'settings' => ['ranges' => $clean, 'overview_range' => $overviewRange, 'forecast_range' => $forecastRange, 'labels' => $current['labels']],
         ]);
         break;
     }
@@ -324,19 +360,30 @@ switch ($action) {
         if ($sensorName === '') {
             fail(400, 'sensor is required.');
         }
+        $exists = $pdo->prepare('SELECT 1 FROM sensors WHERE name = :name');
+        $exists->execute(['name' => $sensorName]);
+        if (!$exists->fetchColumn()) {
+            fail(404, "Unknown sensor: {$sensorName}");
+        }
         $label = trim((string) ($input['label'] ?? ''));
         if (strlen($label) > MAX_LABEL_LEN) {
             fail(400, "Label must be at most " . MAX_LABEL_LEN . " characters.");
         }
-        // Empty string clears the label back to NULL rather than storing "".
-        $stmt = $pdo->prepare('UPDATE sensors SET label = :label WHERE name = :name');
-        $stmt->execute([
-            'label' => $label === '' ? null : $label,
-            'name'  => $sensorName,
-        ]);
-        if ($stmt->rowCount() === 0) {
-            fail(404, "Unknown sensor: {$sensorName}");
+        $settings = currentSettings($pdo, (int) $passwordId);
+        if (!$settings) {
+            fail(500, 'That profile is missing its settings row.');
         }
+        $labels = $settings['labels'];
+        // Empty string removes the entry rather than storing "" — the
+        // Overview tab falls back to the sensor's device name either way,
+        // but this keeps the stored map from accumulating empty entries.
+        if ($label === '') {
+            unset($labels[$sensorName]);
+        } else {
+            $labels[$sensorName] = $label;
+        }
+        $stmt = $pdo->prepare('UPDATE settings SET sensor_labels = :labels WHERE password_id = :pid');
+        $stmt->execute(['labels' => encodeLabels($labels), 'pid' => $passwordId]);
         echo json_encode(['ok' => true, 'sensor' => $sensorName, 'label' => $label === '' ? null : $label]);
         break;
     }

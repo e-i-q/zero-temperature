@@ -127,15 +127,17 @@ After setup, the dashboard is served at `http://<pi5-address>/`.
 - **Settings tab — sensor labels**: logged in, the Settings tab also lists
   every registered sensor with a text field for a friendly label ("Kitchen",
   "Bedroom", "Garage", ...), saved via `api/settings.php`'s
-  `save_sensor_label` action to the `sensors.label` column (see
-  `../../db/database/sensors/tables/sensors.md`). A sensor with a label
-  shows it in place of its device name everywhere the Overview tab displays
-  sensor identity (tiles, legend, chart tooltip, recent-readings table) —
-  the device name itself stays visible too, faded into the background of
-  that sensor's tile, rather than disappearing. Not per-profile — like the
-  sensor registry itself, a label is global to the Hive, just gated behind
-  being logged into *some* profile. Clearing a field reverts to showing the
-  device name only.
+  `save_sensor_label` action into that profile's own `settings.sensor_labels`
+  column (see `../../db/database/sensors/tables/settings.md`) — private to
+  the logged-in profile, not the shared `sensors` registry, so two profiles
+  on the same Hive can label the same sensor differently. A sensor with a
+  label shows it in place of its device name everywhere the Overview tab
+  displays sensor identity (tiles, legend, chart tooltip, recent-readings
+  table) — the device name itself stays visible too, faded into the
+  background of that sensor's tile, rather than disappearing. Clearing a
+  field reverts to showing the device name only; logged out, the Overview
+  tab always shows device names, same as the range chips falling back to
+  their fixed default set.
 - **Settings tab — manual sync trigger**: logged in, the Settings tab also
   lists every registered sensor with a "Sync Now" button. Clicking one asks
   `api/sync_trigger.php` to relay a request to that Pi Zero's own

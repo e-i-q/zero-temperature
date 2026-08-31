@@ -38,7 +38,7 @@
   ];
 
   let currentRange = localStorage.getItem(RANGE_STORAGE_KEY) || '24h';
-  let sensors = [];        // [{id, name, description, label, online, latest, stats}]
+  let sensors = [];        // [{id, name, description, online, latest, stats}]
   let series = {};         // { sensorId: [{recorded_at, temperature_c, humidity_pct, sample_count}] }
   let dailySeries = {};    // { sensorId: [{day, temp_avg, temp_min, temp_max}] }
   let hidden = new Set();  // sensor ids toggled off via the legend
@@ -59,6 +59,12 @@
   // chosen from — follows you to other browsers/devices.
   let settingsLoggedIn = false;
   let availableRanges = DEFAULT_RANGES.slice(); // shared by both Overview and Forecast chip rows
+  // This profile's own sensor-name -> friendly-label map (settings.php's
+  // `sensor_labels`, see its docstring) — private per profile, so it's only
+  // ever populated while logged in and cleared back to {} on logout. Empty
+  // (not fetched at all) for a logged-out visitor, who sees device names
+  // only, same as the ranges editor being unavailable to them.
+  let sensorLabels = {};
 
   // -- Theme (light/dark) ------------------------------------------------------
   // The actual data-theme attribute is set as early as possible by the
@@ -109,12 +115,18 @@
     return Math.round(hours / 24) + 'd ago';
   }
 
-  // A sensor's label (set from the Settings tab, see api/settings.php's
-  // save_sensor_label) stands in for its device `name` wherever the
-  // dashboard shows sensor identity — falls back to `name` for a sensor
-  // that's never been given one.
+  // A sensor's label — this profile's own entry in sensorLabels, set from
+  // the Settings tab (api/settings.php's save_sensor_label) — stands in for
+  // its device `name` wherever the dashboard shows sensor identity. Returns
+  // null (rather than falling back itself) so callers can also decide
+  // whether to show the device-name watermark/title only when a label is
+  // actually standing in for it.
+  function labelFor(s) {
+    const l = sensorLabels[s.name];
+    return (l && l.trim()) ? l : null;
+  }
   function displayName(s) {
-    return (s.label && s.label.trim()) ? s.label : s.name;
+    return labelFor(s) || s.name;
   }
 
   function colorFor(sensorId) {
@@ -365,7 +377,7 @@
       swatch.style.background = colorFor(s.id);
       const label = document.createElement('span');
       label.textContent = displayName(s); // from the DB — textContent, never innerHTML
-      if (s.label && s.label.trim()) item.title = s.name; // device name, on hover, when a label is standing in for it
+      if (labelFor(s)) item.title = s.name; // device name, on hover, when a label is standing in for it
       item.append(swatch, label);
       item.addEventListener('click', () => {
         if (hidden.has(s.id)) hidden.delete(s.id); else hidden.add(s.id);
@@ -400,7 +412,7 @@
       // Device name, watermarked into the background — only when a label is
       // actually standing in for it above; otherwise tile-label already
       // shows the device name and a second copy would be redundant.
-      if (s.label && s.label.trim()) {
+      if (labelFor(s)) {
         const nameBg = document.createElement('span');
         nameBg.className = 'tile-name-bg';
         nameBg.textContent = s.name;
@@ -486,7 +498,7 @@
       sw.style.background = colorFor(sensor.id);
       const nameSpan = document.createElement('span');
       nameSpan.textContent = displayName(sensor);
-      if (sensor.label && sensor.label.trim()) nameSpan.title = sensor.name;
+      if (labelFor(sensor)) nameSpan.title = sensor.name;
       tdSensor.append(sw, nameSpan);
       const tdTemp = document.createElement('td');
       tdTemp.textContent = point.temperature_c.toFixed(1);
@@ -871,7 +883,7 @@
       const name = document.createElement('span');
       name.className = 'tooltip-name';
       name.textContent = displayName(sensor);
-      if (sensor.label && sensor.label.trim()) name.title = sensor.name;
+      if (labelFor(sensor)) name.title = sensor.name;
       row.append(key, val, name);
       rowsBox.appendChild(row);
     }
@@ -924,6 +936,16 @@
     el('settings-gate').hidden = false;
     el('settings-profile').hidden = true;
     el('ranges-list').innerHTML = '';
+    el('label-list').innerHTML = '';
+
+    // Labels are private to the profile just logged out of — drop them and
+    // redraw anything that was showing one, back to device names only.
+    if (Object.keys(sensorLabels).length) {
+      sensorLabels = {};
+      renderLegend();
+      renderTiles();
+      drawTable();
+    }
 
     // Revert to the fixed default chip set. If either tab's active
     // selection was a custom token that only existed in the profile just
@@ -971,6 +993,8 @@
     localStorage.setItem(FORECAST_RANGE_STORAGE_KEY, forecastRange);
     renderChips('range-chips', currentRange);
     renderChips('forecast-range-chips', forecastRange);
+    // This profile's own sensor labels — see sensorLabels above.
+    sensorLabels = settings.labels || {};
   }
 
   // Fire-and-forget save, called from the range-chip handlers below when
@@ -1130,11 +1154,12 @@
   const RANGE_TOKEN_RE = /^(all|[1-9]\d{0,2}(h|d|w|m))$/;
 
   // -- Sensor labels (per-sensor friendly name, shown on Overview) ------------
-  // Only shown logged in, same as the ranges editor and sync list below — a
-  // label is global to the sensors registry (not per-profile), just gated
-  // behind being logged into *some* profile. Not rebuilt on every
-  // loadReadings() poll (unlike renderSyncList()) so an in-progress edit in
-  // one of these inputs is never clobbered out from under someone typing.
+  // Only shown logged in, same as the ranges editor and sync list below —
+  // but unlike those, a label is private to this profile (settings.php's
+  // `sensor_labels`), not the one shared `sensors` registry. Not rebuilt on
+  // every loadReadings() poll (unlike renderSyncList()) so an in-progress
+  // edit in one of these inputs is never clobbered out from under someone
+  // typing.
   function renderLabelList() {
     const list = el('label-list');
     if (!list) return;
@@ -1152,7 +1177,7 @@
       input.className = 'settings-input label-item-input';
       input.maxLength = 40;
       input.placeholder = 'e.g. Kitchen';
-      input.value = s.label || '';
+      input.value = sensorLabels[s.name] || '';
       input.dataset.sensor = s.name;
 
       const btn = document.createElement('button');
@@ -1183,8 +1208,11 @@
       const payload = await postSettings('save_sensor_label', { sensor: sensorName, label });
       // Reflect the saved value into local state and every place on Overview
       // that shows sensor identity, without waiting for the next poll.
-      const s = sensors.find((x) => x.name === sensorName);
-      if (s) s.label = payload.label;
+      if (payload.label) {
+        sensorLabels[sensorName] = payload.label;
+      } else {
+        delete sensorLabels[sensorName];
+      }
       input.value = payload.label || '';
       result.textContent = payload.label ? `Saved — Overview now shows "${payload.label}".` : 'Saved — Overview shows the device name again.';
       result.classList.add('ok');

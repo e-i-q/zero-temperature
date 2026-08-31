@@ -67,7 +67,7 @@ $pdo = db();
 // readings in this window, so the dashboard can still render an offline
 // tile for them instead of silently dropping them. --------------------------
 try {
-    $sensors = $pdo->query('SELECT id, name, description, ip_address, label FROM sensors ORDER BY name')->fetchAll();
+    $sensors = $pdo->query('SELECT id, name, description, ip_address FROM sensors ORDER BY name')->fetchAll();
 } catch (PDOException $e) {
     fail(500, 'Could not read sensor registry: ' . $e->getMessage());
 }
@@ -134,10 +134,6 @@ foreach ($sensors as $s) {
         'name'        => $s['name'],
         'description' => $s['description'],
         'ip_address'  => $s['ip_address'],
-        // The Overview tab displays this in place of `name` when set, with
-        // `name` kept visible in the background of each tile — see
-        // ../../../../db/database/sensors/tables/sensors.md.
-        'label'       => $s['label'],
         'online'      => $online,
         'latest'      => $latest,
         'stats'       => $temps ? [
