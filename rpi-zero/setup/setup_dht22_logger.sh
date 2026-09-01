@@ -21,7 +21,7 @@ source "${SCRIPT_DIR}/lib/log.sh"
 # -- Config (override via env vars before running) ----------------------------
 LOGGER_SCRIPT="${LOGGER_SCRIPT:-${SCRIPT_DIR}/../python/dht22_logger.py}"
 
-RUN_USER="${RUN_USER:-eiq}"                              # Must have GPIO + DB access
+RUN_USER="${RUN_USER:-${SUDO_USER:-$(whoami)}}"           # Must have GPIO + DB access
 DB_PATH="${DB_PATH:-/mnt/sqlite_ram/sensors.db}"
 SAMPLES="${SAMPLES:-10}"
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-50}"

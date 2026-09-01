@@ -45,7 +45,7 @@ FLUSH_LOG="/var/log/sqlite_flush.log"
 CRON_HOUR="${CRON_HOUR:-3}"      # Daily flush time (24h)
 CRON_MINUTE="${CRON_MINUTE:-0}"
 
-RUN_USER="${RUN_USER:-eiq}"       # System user that will own/access the DB
+RUN_USER="${RUN_USER:-${SUDO_USER:-$(whoami)}}"  # System user that will own/access the DB
 FLUSH_SCRIPT="/usr/local/bin/sqlite_flush_to_sd"
 RESTORE_SCRIPT="/usr/local/bin/sqlite_restore_from_sd"
 
