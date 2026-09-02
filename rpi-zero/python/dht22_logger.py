@@ -58,7 +58,6 @@ import psycopg2
 import local_db
 import remote_db
 import sync_backlog
-dht_device = adafruit_dht.DHT22(board.D2)  # D2 = GPIO2
 
 # ── Configuration ──────────────────────────────────────────────────────────
 DEFAULT_PIN = 2             # BCM GPIO2 (physical pin 3)
@@ -69,7 +68,7 @@ DEFAULT_DB_PATH = "/mnt/sqlite_ram/sensors.db"
 DEFAULT_SENSOR_NAME = "dht22"
 
 
-def read_samples(pin, samples, delay, max_attempts):
+def read_samples(dht_device, samples, delay, max_attempts):
     temps, hums = [], []
     for i in range(1, max_attempts + 1):
         try:
@@ -180,8 +179,15 @@ def main() -> int:
     db_path = Path(args.db)
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
+    try:
+        pin = getattr(board, f"D{args.pin}")
+    except AttributeError:
+        print(f"ERROR: board has no pin D{args.pin} (--pin {args.pin} is not a valid GPIO number).", file=sys.stderr)
+        return 1
+    dht_device = adafruit_dht.DHT22(pin)
+
     print(f"Reading DHT22 on GPIO{args.pin} — {args.samples} samples, {args.max_attempts} max attempts, {args.delay}s apart…")
-    temps, hums = read_samples(args.pin, args.samples, args.delay, args.max_attempts)
+    temps, hums = read_samples(dht_device, args.samples, args.delay, args.max_attempts)
 
     if not temps:
         print("ERROR: All sensor reads failed. Check wiring and pull-up resistor.", file=sys.stderr)
