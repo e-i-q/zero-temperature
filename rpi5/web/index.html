@@ -120,6 +120,8 @@
         <div class="legend-item static"><span class="legend-swatch" style="background:var(--temp)"></span><span>Temperature</span></div>
         <div class="legend-item static"><span class="legend-swatch" style="background:var(--humidity)"></span><span>Humidity</span></div>
         <div class="legend-item static"><span class="legend-swatch" style="background:var(--wind)"></span><span>Wind speed</span></div>
+        <div class="legend-item static"><span class="legend-swatch" style="background:var(--rain)"></span><span>Rain</span></div>
+        <div class="legend-item static"><span class="legend-swatch" style="background:var(--snow)"></span><span>Snow</span></div>
       </div>
     </div>
 
@@ -133,7 +135,7 @@
       <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
       <div class="chart-head">
         <span class="chart-title">Temperature forecast — Brno (Open-Meteo)</span>
-        <span class="chart-note" id="forecast-note">shaded bands = approx. night (20:00–06:00)</span>
+        <span class="chart-note" id="forecast-note">shaded bands = approx. night (20:00–06:00) · bars = hourly rain/snow</span>
       </div>
       <div class="chart-wrap"><svg id="chart-forecast" viewBox="0 0 1000 240" preserveAspectRatio="none"></svg></div>
     </section>

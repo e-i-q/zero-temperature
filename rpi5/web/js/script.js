@@ -235,8 +235,8 @@
       el('section-forecast').style.display = forecastReadings.length ? 'block' : 'none';
       drawForecastChart();
       el('forecast-note').textContent = payload.clamped
-        ? `shaded bands = approx. night (20:00–06:00) · Open-Meteo only forecasts ${payload.forecast_days_max} days ahead — showing the max available`
-        : 'shaded bands = approx. night (20:00–06:00)';
+        ? `shaded bands = approx. night (20:00–06:00) · bars = hourly rain/snow · Open-Meteo only forecasts ${payload.forecast_days_max} days ahead — showing the max available`
+        : 'shaded bands = approx. night (20:00–06:00) · bars = hourly rain/snow';
       el('forecast-footer-count').textContent = payload.count + ' forecast hour' + (payload.count === 1 ? '' : 's');
       el('forecast-footer-generated').textContent = 'Queried ' + fmtTime(payload.generated_at);
     } catch (err) {
@@ -736,6 +736,11 @@
     const temps = data.map((r) => r.temperature_c);
     const hums = data.map((r) => r.humidity_pct);
     const winds = data.map((r) => r.wind_speed_kmh);
+    // '|| 0' covers a forecast cache written before rain_mm/snowfall_cm
+    // existed (see api/forecast.php) — old cached rows just show no bars
+    // rather than breaking the chart until the next Open-Meteo refetch.
+    const rains = data.map((r) => r.rain_mm || 0);
+    const snows = data.map((r) => r.snowfall_cm || 0);
 
     const tMin = times[0], tMax = times[times.length - 1];
     const tempMin = Math.floor(Math.min(...temps) - 1);
@@ -751,6 +756,8 @@
     const tempColor = cssVar('--temp');
     const humidityColor = cssVar('--humidity');
     const windColor = cssVar('--wind');
+    const rainColor = cssVar('--rain');
+    const snowColor = cssVar('--snow');
 
     for (const [a, b] of nightBands(tMin, tMax)) {
       svg.appendChild(makeEl('rect', { x: x(a), y: marginTop, width: Math.max(0, x(b) - x(a)), height: plotH, fill: gridColor(), 'fill-opacity': 0.05 }));
@@ -793,6 +800,34 @@
       const y = marginTop + (plotH / 4) * i;
       svg.appendChild(makeEl('text', { x: marginLeft - 8, y: y + 4, 'text-anchor': 'end', 'font-size': 10, fill: humidityColor })).textContent = v.toFixed(0) + '%';
     }
+
+    // Rain/snow bars - one hour-wide bar per forecast hour, anchored to the
+    // plot's bottom edge and scaled to their own small band there so they
+    // read as a strip under the lines rather than competing with them. Rain
+    // (mm) and snow (cm) are different units plotted on a shared band purely
+    // for a compact visual, not a literal shared scale — each hour's bar is
+    // split in half (rain left, snow right) since the two rarely overlap.
+    const baselineY = H - marginBottom;
+    const precipBandH = plotH * 0.32;
+    const precipMax = Math.max(1, Math.max(...rains), Math.max(...snows));
+    const yPrecip = (v) => baselineY - Math.min(1, v / precipMax) * precipBandH;
+    const hourPx = plotW / Math.max(1, rangeHours);
+    const barW = Math.max(1, hourPx - Math.min(2, hourPx * 0.08));
+    const subW = barW / 2;
+
+    const precipBars = makeEl('g', { class: 'precip-bars' });
+    for (let i = 0; i < data.length; i++) {
+      const x0 = x(times[i]);
+      if (rains[i] > 0) {
+        const barY = yPrecip(rains[i]);
+        precipBars.appendChild(makeEl('rect', { x: x0, y: barY, width: subW, height: Math.max(0, baselineY - barY), fill: rainColor, 'fill-opacity': 0.55 }));
+      }
+      if (snows[i] > 0) {
+        const barY = yPrecip(snows[i]);
+        precipBars.appendChild(makeEl('rect', { x: x0 + subW, y: barY, width: subW, height: Math.max(0, baselineY - barY), fill: snowColor, 'fill-opacity': 0.7 }));
+      }
+    }
+    svg.appendChild(precipBars);
 
     // Build path strings — same plain solid-line style as the Overview
     // charts (drawChart()): no area fill, uniform stroke-width, round caps,

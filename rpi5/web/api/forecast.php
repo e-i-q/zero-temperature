@@ -62,7 +62,7 @@ function fetchForecastFromApi(): ?array {
     $url = 'https://api.open-meteo.com/v1/forecast?' . http_build_query([
         'latitude'      => WEATHER_LATITUDE,
         'longitude'     => WEATHER_LONGITUDE,
-        'hourly'        => 'temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code',
+        'hourly'        => 'temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code,rain,snowfall',
         'timezone'      => 'UTC', // keep instants comparable to recorded_at, which is UTC
         'forecast_days' => FORECAST_DAYS_MAX,
     ]);
@@ -79,11 +79,14 @@ function fetchForecastFromApi(): ?array {
     $hums  = $data['hourly']['relative_humidity_2m'] ?? null;
     $winds = $data['hourly']['wind_speed_10m'] ?? null;
     $codes = $data['hourly']['weather_code'] ?? null;
-    if (!$times || !$temps || !$hums || !$winds || !$codes) return null;
+    $rains = $data['hourly']['rain'] ?? null;      // mm, liquid + showers (excludes snowfall)
+    $snows = $data['hourly']['snowfall'] ?? null;  // cm
+    if (!$times || !$temps || !$hums || !$winds || !$codes || !$rains || !$snows) return null;
 
     $rows = [];
     foreach ($times as $i => $time) {
-        if ($temps[$i] === null || $hums[$i] === null || $winds[$i] === null || $codes[$i] === null) {
+        if ($temps[$i] === null || $hums[$i] === null || $winds[$i] === null || $codes[$i] === null
+            || $rains[$i] === null || $snows[$i] === null) {
             continue; // skip intervals with incomplete data rather than plotting gaps
         }
         $rows[] = [
@@ -92,6 +95,8 @@ function fetchForecastFromApi(): ?array {
             'humidity_pct'   => round((float) $hums[$i], 2),
             'wind_speed_kmh' => round((float) $winds[$i], 2),
             'weather_code'   => (int) $codes[$i], // WMO code, used client-side to pick a condition icon
+            'rain_mm'        => round((float) $rains[$i], 2),   // this hour's rainfall
+            'snowfall_cm'    => round((float) $snows[$i], 2),   // this hour's snowfall
         ];
     }
     return $rows;

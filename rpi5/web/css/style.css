@@ -51,6 +51,8 @@
   --temp: #c1502e;
   --humidity: #3a5a78;
   --wind: #4c8a5e;
+  --rain: #2a78d6;
+  --snow: #9fb8c9;
 }
 
 /* -- Dark theme — same token set, remapped onto the grayscale ramp above.
