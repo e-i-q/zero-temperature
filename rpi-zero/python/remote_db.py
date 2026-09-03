@@ -51,6 +51,26 @@ def register_sensor(conn, hostname: str, ip_address: str | None = None) -> None:
     conn.commit()
 
 
+def update_status(conn, hostname: str, status: str) -> None:
+    """Set this Pi's `status` in the remote `sensors` table — the live
+    OK/CHARGING <pct>%/BATTERY <pct>% label ups_ina219.py computes from the
+    UPS HAT, shown per sensor tile on the Hive dashboard's Overview tab.
+    Same upsert shape as register_sensor() above: if this Pi doesn't have a
+    `sensors` row yet (dht22_logger.py hasn't run here, or this is its very
+    first write), the INSERT branch creates a placeholder one rather than
+    silently doing nothing."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO sensors (name, description, status)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (name) DO UPDATE SET status = EXCLUDED.status
+            """,
+            (hostname, f"Auto-registered by ups_ina219.py on {hostname}", status),
+        )
+    conn.commit()
+
+
 def local_hostname() -> str:
     """Equivalent of `uname -n` — used as this RPi's name in the remote `sensors` table."""
     return os.uname().nodename

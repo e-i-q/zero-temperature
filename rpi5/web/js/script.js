@@ -405,7 +405,17 @@
       label.textContent = displayName(s);
       const badge = document.createElement('span');
       badge.className = 'tile-badge';
-      badge.textContent = s.online ? 'OK' : 'OFFLINE';
+      if (!s.online) {
+        badge.textContent = 'OFFLINE';
+      } else if (s.status && s.status !== 'OK') {
+        // "CHARGING <pct>%" / "BATTERY <pct>%" from ups_ina219.py, via
+        // sensors.status — see readings.php. Anything else (no UPS HAT
+        // fitted, or status not yet reported) falls through to plain OK.
+        badge.classList.add(s.status.startsWith('CHARGING') ? 'charging' : 'battery');
+        badge.textContent = s.status;
+      } else {
+        badge.textContent = 'OK';
+      }
       head.append(label, badge);
       tile.appendChild(head);
 

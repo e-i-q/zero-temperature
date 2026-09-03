@@ -67,7 +67,7 @@ $pdo = db();
 // readings in this window, so the dashboard can still render an offline
 // tile for them instead of silently dropping them. --------------------------
 try {
-    $sensors = $pdo->query('SELECT id, name, description, ip_address FROM sensors ORDER BY name')->fetchAll();
+    $sensors = $pdo->query('SELECT id, name, description, ip_address, status FROM sensors ORDER BY name')->fetchAll();
 } catch (PDOException $e) {
     fail(500, 'Could not read sensor registry: ' . $e->getMessage());
 }
@@ -134,6 +134,11 @@ foreach ($sensors as $s) {
         'name'        => $s['name'],
         'description' => $s['description'],
         'ip_address'  => $s['ip_address'],
+        // Live power state from ups_ina219.py's remote_db.update_status()
+        // — "OK" / "CHARGING <pct>%" / "BATTERY <pct>%", or null for a
+        // sensor with no UPS HAT (or one that's never run that script).
+        // script.js treats null the same as "OK" while the sensor is online.
+        'status'      => $s['status'],
         'online'      => $online,
         'latest'      => $latest,
         'stats'       => $temps ? [

@@ -26,7 +26,8 @@ failing. Nothing needs to be done by hand to catch back up: see
 | Path | Purpose |
 |---|---|
 | `python/dht22_logger.py` | Reads the DHT22, averages multiple samples, writes a row to SQLite, mirrors it live to the central DB |
-| `python/remote_db.py` | Shared PostgreSQL connection/config, used by both `dht22_logger.py` and `sync_backlog.py` |
+| `python/ups_ina219.py` | Reads the INA219-based UPS HAT and writes this Pi's live power status to the central DB — see "UPS battery status" below |
+| `python/remote_db.py` | Shared PostgreSQL connection/config, used by `dht22_logger.py`, `ups_ina219.py` and `sync_backlog.py` |
 | `python/sync_backlog.py` | Pushes any local readings not yet confirmed on the central DB — see "Offline backlog sync" below |
 | `web/index.html`, `web/css/`, `web/js/` | Dashboard: live readings, min/max/avg stats, timeline chart with sunrise/sunset markers |
 | `web/readings.php` | JSON API the dashboard polls; queries the SQLite database read-only |
@@ -34,6 +35,7 @@ failing. Nothing needs to be done by hand to catch back up: see
 | `setup/setup_sqlite_ramdisk.sh` | Mounts a tmpfs RAM disk for the SQLite DB, with daily SD backup + restore-on-boot |
 | `setup/setup_nginx_php.sh` | Installs and configures nginx + PHP-FPM (with `pdo_sqlite`) |
 | `setup/setup_dht22_logger.sh` | Installs Python deps and a cron job that runs the logger periodically |
+| `setup/setup_ups_ina219.sh` | Installs Python deps, enables I2C, and a cron job that runs the UPS monitor periodically |
 | `setup/setup_sync_trigger.sh` | Provisions `web/sync.php`'s shared secret and script/DB paths |
 | `setup/deploy_web.sh` | Syncs `web/` into the nginx web root |
 | `setup/lib/log.sh` | Shared colored logging + quiet-by-default install output for the scripts above |
@@ -53,6 +55,7 @@ sudo bash setup/setup_sqlite_ramdisk.sh   # RAM-backed SQLite DB + backup/restor
 sudo bash setup/setup_nginx_php.sh        # nginx + PHP-FPM + pdo_sqlite
 bash setup/deploy_web.sh                  # copy web/ into the nginx web root
 sudo bash setup/setup_dht22_logger.sh     # installs deps + cron job for the logger
+sudo bash setup/setup_ups_ina219.sh       # optional — only for Zeros with a UPS HAT
 ```
 
 Each script is configurable via environment variables (e.g. `RUN_USER`,
@@ -76,6 +79,28 @@ python3 python/dht22_logger.py --samples 5 --delay 2.5 --db /mnt/sqlite_ram/sens
 ```
 
 Requires `adafruit-circuitpython-dht` (`pip3 install adafruit-circuitpython-dht --break-system-packages`).
+
+## UPS battery status
+
+Pi Zeros fitted with an INA219-based UPS HAT (battery info over I2C) can run
+`python/ups_ina219.py` on a cron job (`setup/setup_ups_ina219.sh`, every 5
+minutes by default) to report their live power state into the central
+database's `sensors.status` column — shown as a badge on that sensor's tile
+in the Hive dashboard's Overview tab (`../rpi5`):
+
+- **OK** — on mains, battery full
+- **CHARGING &lt;pct&gt;%** — on mains, battery topping up
+- **BATTERY &lt;pct&gt;%** — mains lost, running on battery
+
+This is entirely optional and independent of `dht22_logger.py` — a Zero
+without a UPS HAT just never writes `status`, and the dashboard shows OK for
+it whenever it's otherwise online. It needs the same central-DB `status`
+column set up first (see `../../db/database/sensors/tables/sensors.md`), and
+the same `~/.pgpass` entry as `dht22_logger.py` for the `sensor_writer` role.
+
+```bash
+sudo bash setup/setup_ups_ina219.sh     # installs deps, enables I2C, cron job
+```
 
 ## Offline backlog sync
 

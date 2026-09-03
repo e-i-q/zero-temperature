@@ -100,6 +100,13 @@ After setup, the dashboard is served at `http://<pi5-address>/`.
 - **Offline sensors**: a sensor with no reading in the last 30 minutes
   (`OFFLINE_MINUTES` in `readings.php`) is shown greyed-out with a "last
   seen" time, rather than silently disappearing from the tile grid.
+- **UPS battery status**: a sensor's tile badge reads OK / CHARGING &lt;pct&gt;%
+  / BATTERY &lt;pct&gt;% instead of the plain OK/OFFLINE, driven by the
+  `sensors.status` column — see `../rpi-zero/README.md`'s "UPS battery
+  status" section for the Pi Zero side (`ups_ina219.py`, opt-in per sensor,
+  needs a UPS HAT). An offline sensor still shows OFFLINE regardless of its
+  last-known status; a sensor with no UPS HAT (or `status` not yet written)
+  shows OK once online, same as before this column existed.
 - **Forecast tab**: `forecast.php` reuses the Overview tab's range-chip UI
   (12H/24H/2D/5D/1M/ALL) so both tabs feel the same, but it's inherently a
   forward-looking window — Open-Meteo's free `/v1/forecast` endpoint only

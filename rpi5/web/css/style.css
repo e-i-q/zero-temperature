@@ -43,6 +43,10 @@
   --status-good-bg: #eaf5ea;
   --status-good-text: #0ca30c;
   --status-offline-bg: rgba(29, 31, 32, 0.06);
+  /* UPS status badges (sensors.status, see ups_ina219.py) — battery amber
+     (draws the eye, mains is lost), charging blue (informational only). */
+  --status-battery-text: #c1861f;
+  --status-charging-text: #2a78d6;
 
   /* -- Forecast tab accents — same light-theme values as rpi-zero's
         weather chart (../rpi-zero/web/css/style.css), kept separate from
@@ -538,6 +542,8 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
   flex: none;
 }
 .tile.offline .tile-badge { border-color: var(--color-divider-strong); color: var(--color-text-muted); }
+.tile-badge.battery { border-color: var(--status-battery-text); color: var(--status-battery-text); }
+.tile-badge.charging { border-color: var(--status-charging-text); color: var(--status-charging-text); }
 
 .tile-value {
   display: flex;
