@@ -794,26 +794,30 @@
       svg.appendChild(makeEl('text', { x: marginLeft - 8, y: y + 4, 'text-anchor': 'end', 'font-size': 10, fill: humidityColor })).textContent = v.toFixed(0) + '%';
     }
 
-    // Build path strings + filled area under temp/humidity, closed to the plot baseline
+    // Build path strings — same plain solid-line style as the Overview
+    // charts (drawChart()): no area fill, uniform stroke-width, round caps,
+    // and a ring+dot marker on the last point of each series. Wind keeps a
+    // dash so it stays distinguishable from temp/humidity on the same axes.
     const tempPath = data.map((r, i) => (i === 0 ? 'M' : 'L') + x(times[i]).toFixed(1) + ',' + yTemp(r.temperature_c).toFixed(1)).join(' ');
     const humPath = data.map((r, i) => (i === 0 ? 'M' : 'L') + x(times[i]).toFixed(1) + ',' + yHum(r.humidity_pct).toFixed(1)).join(' ');
     const windPath = data.map((r, i) => (i === 0 ? 'M' : 'L') + x(times[i]).toFixed(1) + ',' + yWind(r.wind_speed_kmh).toFixed(1)).join(' ');
-    const baselineY = H - marginBottom;
-    const tempAreaPath = `${tempPath} L${x(times[data.length - 1]).toFixed(1)},${baselineY} L${x(times[0]).toFixed(1)},${baselineY} Z`;
-    const humAreaPath = `${humPath} L${x(times[data.length - 1]).toFixed(1)},${baselineY} L${x(times[0]).toFixed(1)},${baselineY} Z`;
 
-    const clipId = 'forecast-plot-clip';
-    const clip = makeEl('clipPath', { id: clipId });
-    clip.appendChild(makeEl('rect', { x: marginLeft, y: marginTop, width: plotW, height: plotH }));
-    svg.appendChild(clip);
+    svg.appendChild(makeEl('path', { d: humPath, fill: 'none', stroke: humidityColor, 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
+    svg.appendChild(makeEl('path', { d: windPath, fill: 'none', stroke: windColor, 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-dasharray': '4,2' }));
+    svg.appendChild(makeEl('path', { d: tempPath, fill: 'none', stroke: tempColor, 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
 
-    const plotData = makeEl('g', { 'clip-path': `url(#${clipId})` });
-    plotData.appendChild(makeEl('path', { d: humAreaPath, fill: humidityColor, stroke: 'none', 'fill-opacity': 0.08 }));
-    plotData.appendChild(makeEl('path', { d: tempAreaPath, fill: tempColor, stroke: 'none', 'fill-opacity': 0.08 }));
-    plotData.appendChild(makeEl('path', { d: humPath, fill: 'none', stroke: humidityColor, 'stroke-width': 1.5, 'stroke-opacity': 0.85 }));
-    plotData.appendChild(makeEl('path', { d: windPath, fill: 'none', stroke: windColor, 'stroke-width': 1.25, 'stroke-opacity': 0.85, 'stroke-dasharray': '4,2' }));
-    plotData.appendChild(makeEl('path', { d: tempPath, fill: 'none', stroke: tempColor, 'stroke-width': 1.75 }));
-    svg.appendChild(plotData);
+    const lastT = times[times.length - 1];
+    for (const { v, y, color } of [
+      { v: temps[temps.length - 1], y: yTemp, color: tempColor },
+      { v: hums[hums.length - 1], y: yHum, color: humidityColor },
+      { v: winds[winds.length - 1], y: yWind, color: windColor },
+    ]) {
+      const cx = x(lastT), cy = y(v);
+      // 2px surface ring so the end-marker stays legible where lines cross —
+      // matches drawChart()'s end-marker treatment on the Overview charts.
+      svg.appendChild(makeEl('circle', { cx, cy, r: 5.5, fill: cssVar('--color-bg') }));
+      svg.appendChild(makeEl('circle', { cx, cy, r: 4, fill: color }));
+    }
 
     // Weather condition icon strip - one icon per tick, spaced independently
     // from the time-axis labels so long ranges (e.g. 1M/ALL) don't smear
