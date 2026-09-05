@@ -172,32 +172,45 @@
         <p class="settings-status">Logged in — Overview/Forecast chip clicks now save here.</p>
         <p class="settings-current" id="settings-current"></p>
 
-        <p class="settings-status">Time spans (shared by both Overview and Forecast):</p>
-        <ul class="ranges-list" id="ranges-list"></ul>
-        <form class="settings-form" id="ranges-add-form">
-          <input type="text" class="settings-input ranges-input" id="ranges-add-input" placeholder="e.g. 6h, 3d, 1w" maxlength="8" required>
-          <button type="submit" class="btn btn-secondary">Add Time Span</button>
-        </form>
-        <p class="settings-error" id="ranges-error" hidden></p>
+        <div class="settings-layout">
+          <nav class="settings-nav" id="settings-nav">
+            <button class="settings-nav-item active" type="button" data-section="overview">Overview</button>
+            <button class="settings-nav-item" type="button" data-section="sensors">Sensors</button>
+          </nav>
 
-        <p class="settings-status">Sensor labels:</p>
-        <p class="settings-current">
-          Give a sensor a friendly name and it replaces the sensor's device
-          name on the Overview tab's tiles/legend/charts — the device name
-          stays visible too, faded into the background of its tile. Private
-          to this profile — another profile logged into the same Hive can
-          set its own labels without affecting yours. Leave a field blank to
-          go back to showing the device name only.
-        </p>
-        <ul class="label-list" id="label-list"></ul>
+          <div class="settings-sections">
+            <div class="settings-section" data-section="overview">
+              <p class="settings-status">Time spans (shared by both Overview and Forecast):</p>
+              <ul class="ranges-list" id="ranges-list"></ul>
+              <form class="settings-form" id="ranges-add-form">
+                <input type="text" class="settings-input ranges-input" id="ranges-add-input" placeholder="e.g. 6h, 3d, 1w" maxlength="8" required>
+                <button type="submit" class="btn btn-secondary">Add Time Span</button>
+              </form>
+              <p class="settings-error" id="ranges-error" hidden></p>
+            </div>
 
-        <p class="settings-status">Manual sync trigger:</p>
-        <p class="settings-current">
-          Only useful for a Pi Zero that's been offline — asks it to push
-          any local readings not yet in this database. See
-          rpi-zero/web/sync.php.
-        </p>
-        <ul class="sync-list" id="sync-list"></ul>
+            <div class="settings-section" data-section="sensors" hidden>
+              <p class="settings-status">Sensor labels:</p>
+              <p class="settings-current">
+                Give a sensor a friendly name and it replaces the sensor's device
+                name on the Overview tab's tiles/legend/charts — the device name
+                stays visible too, faded into the background of its tile. Private
+                to this profile — another profile logged into the same Hive can
+                set its own labels without affecting yours. Leave a field blank to
+                go back to showing the device name only.
+              </p>
+              <ul class="label-list" id="label-list"></ul>
+
+              <p class="settings-status">Manual sync trigger:</p>
+              <p class="settings-current">
+                Only useful for a Pi Zero that's been offline — asks it to push
+                any local readings not yet in this database. See
+                rpi-zero/web/sync.php.
+              </p>
+              <ul class="sync-list" id="sync-list"></ul>
+            </div>
+          </div>
+        </div>
 
         <button type="button" class="btn btn-secondary" id="settings-logout-btn">Log Out</button>
       </div>

@@ -247,7 +247,38 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
 .weather-icon { pointer-events: none; }
 
 /* -- Settings tab ------------------------------------------------------------ */
-.settings-panel { max-width: 420px; }
+.settings-panel { max-width: 680px; }
+
+.settings-layout { display: flex; gap: 32px; align-items: flex-start; }
+
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  width: 140px;
+  gap: 2px;
+  border-right: 1px solid var(--color-divider);
+  padding-right: 16px;
+}
+
+.settings-nav-item {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-align: left;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  border-left: 2px solid transparent;
+  padding: 7px 0 7px 10px;
+  cursor: pointer;
+}
+.settings-nav-item:hover { color: var(--color-text); }
+.settings-nav-item.active { color: var(--color-text); border-left-color: var(--color-accent); background: var(--color-surface); }
+
+.settings-sections { flex: 1; min-width: 0; }
+.settings-section[hidden] { display: none; }
 
 .settings-blurb {
   font-size: 13px;
@@ -686,4 +717,8 @@ footer {
   .brand { font-size: 17px; }
   .page { padding: 24px 14px 56px; }
   .log-table thead th:nth-child(5), .log-table tbody td:nth-child(5) { display: none; }
+  .settings-layout { flex-direction: column; gap: 12px; }
+  .settings-nav { flex-direction: row; width: auto; border-right: none; border-bottom: 1px solid var(--color-divider); padding-right: 0; padding-bottom: 8px; gap: 4px; }
+  .settings-nav-item { border-left: none; border-bottom: 2px solid transparent; padding: 4px 10px; }
+  .settings-nav-item.active { border-bottom-color: var(--color-accent); }
 }

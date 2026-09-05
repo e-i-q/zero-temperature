@@ -1431,6 +1431,15 @@
   renderChips('range-chips', currentRange);
   renderChips('forecast-range-chips', forecastRange);
 
+  // -- Settings sections -----------------------------------------------------
+  document.getElementById('settings-nav').addEventListener('click', (e) => {
+    const btn = e.target.closest('.settings-nav-item');
+    if (!btn) return;
+    const section = btn.dataset.section;
+    document.querySelectorAll('.settings-nav-item').forEach((b) => b.classList.toggle('active', b === btn));
+    document.querySelectorAll('.settings-section').forEach((p) => { p.hidden = p.dataset.section !== section; });
+  });
+
   // -- Tabs -----------------------------------------------------------------
   // The Forecast tab's data is fetched lazily, the first time it's opened,
   // so a visit that never leaves Overview costs nothing extra against
