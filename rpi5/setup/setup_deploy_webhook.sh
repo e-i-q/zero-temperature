@@ -11,15 +11,22 @@
 # can only ever reach it, never a Pi Zero directly, which is why the fan-out
 # to Pi Zeros happens as a relay from here over the LAN instead.
 #
-# Writes two SEPARATE secrets, both under /etc/git-deploy/ (chmod 640,
-# root:www-data — outside the web root, so deploy_web.sh re-syncing web/
-# can never touch or expose them):
-#   webhook_secret  known only to GitHub and this Pi — verifies the
-#                   X-Hub-Signature-256 GitHub sends on every webhook call.
-#                   Never leaves this Pi except into GitHub's webhook config.
-#   token           the fleet-wide deploy-trigger secret shared with every
-#                   Pi Zero (like /etc/dht22-sync/token, but a separate
-#                   value — deploy and sync are different privileges).
+# Writes three files, all under /etc/git-deploy/ (chmod 640, root:www-data
+# — outside the web root, so deploy_web.sh re-syncing web/ can never touch
+# or expose them):
+#   webhook_secret     known only to GitHub and this Pi — verifies the
+#                      X-Hub-Signature-256 GitHub sends on every webhook
+#                      call. Never leaves this Pi except into GitHub's
+#                      webhook config.
+#   token              the fleet-wide deploy-trigger secret shared with
+#                      every Pi Zero (like /etc/dht22-sync/token, but a
+#                      separate value — deploy and sync are different
+#                      privileges).
+#   git_deploy_script  not a secret — the resolved absolute path to this
+#                      checkout's setup/git_deploy.sh, for deploy_webhook.php
+#                      to read at request time (it runs from a copy of
+#                      web/ under the nginx web root, so it can't find this
+#                      script by walking up from its own location).
 #
 # Also installs a narrow NOPASSWD sudo rule so www-data (running
 # deploy_webhook.php) can run exactly setup/git_deploy.sh as root — needed
@@ -45,6 +52,7 @@ REPO_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CONF_DIR="/etc/git-deploy"
 WEBHOOK_SECRET_FILE="${CONF_DIR}/webhook_secret"
 TOKEN_FILE="${CONF_DIR}/token"
+GIT_DEPLOY_SCRIPT_PATH_FILE="${CONF_DIR}/git_deploy_script"
 LOG_FILE="${LOG_FILE:-/var/log/git-deploy.log}"
 WEB_USER="${WEB_USER:-www-data}"    # runs deploy_webhook.php (PHP-FPM pool user)
 WEB_GROUP="${WEB_GROUP:-www-data}"  # group allowed to read the secrets below
@@ -113,11 +121,12 @@ setup_log_file() {
 
 setup_sudoers() {
   [[ -f "$GIT_DEPLOY_SCRIPT" ]] || error "git_deploy.sh not found at ${GIT_DEPLOY_SCRIPT}."
-  # realpath, not the cd+pwd path above — deploy_webhook.php resolves this
-  # same file via PHP's realpath() (always physical, symlinks resolved)
-  # before exec()'ing it, and sudo matches this rule by exact argv string.
-  # bash's own `pwd` is logical by default, so if any ancestor directory is
-  # a symlink the two could disagree; realpath here keeps them identical.
+  # realpath, not the cd+pwd path above — deploy_webhook.php exec()'s this
+  # same path (read back from GIT_DEPLOY_SCRIPT_PATH_FILE below, not
+  # recomputed from its own location — see that file's docstring for why),
+  # and sudo matches this rule by exact argv string. bash's own `pwd` is
+  # logical by default, so if any ancestor directory is a symlink the two
+  # could disagree; realpath here keeps them identical.
   GIT_DEPLOY_SCRIPT="$(realpath "$GIT_DEPLOY_SCRIPT")"
 
   local rule="${WEB_USER} ALL=(root) NOPASSWD: /usr/bin/bash ${GIT_DEPLOY_SCRIPT}"
@@ -131,6 +140,16 @@ setup_sudoers() {
 
   mv "${SUDOERS_FILE}.tmp" "$SUDOERS_FILE"
   success "Sudo rule installed: ${SUDOERS_FILE} (${WEB_USER} may run git_deploy.sh as root, no password)"
+
+  # deploy_webhook.php runs from a *copy* of web/ under the nginx web root
+  # (see deploy_web.sh), not from this checkout — so it can't find
+  # git_deploy.sh by walking up from its own __DIR__ at request time. Record
+  # the resolved path here instead, next to the secrets above, so it reads
+  # the same canonical string this sudoers rule was written for.
+  printf '%s\n' "$GIT_DEPLOY_SCRIPT" > "$GIT_DEPLOY_SCRIPT_PATH_FILE"
+  chown "root:${WEB_GROUP}" "$GIT_DEPLOY_SCRIPT_PATH_FILE"
+  chmod 640 "$GIT_DEPLOY_SCRIPT_PATH_FILE"
+  success "Recorded git_deploy.sh path for deploy_webhook.php: ${GIT_DEPLOY_SCRIPT_PATH_FILE}"
 }
 
 print_summary() {

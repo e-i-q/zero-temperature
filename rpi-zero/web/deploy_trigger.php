@@ -25,6 +25,7 @@
 declare(strict_types=1);
 
 const TOKEN_FILE = '/etc/git-deploy/token';
+const GIT_DEPLOY_SCRIPT_PATH_FILE = '/etc/git-deploy/git_deploy_script';
 
 // A first deploy of a change touching setup/ or python/ is still just a
 // git pull + a small `cp -a` of web/ — this is generous mainly so a
@@ -57,12 +58,17 @@ if ($expected === '' || $given === '' || !hash_equals($expected, $given)) {
     fail(403, 'Invalid or missing deploy token.');
 }
 
-// realpath(), not a literal __DIR__ . '/../setup/...' concatenation — the
-// sudoers rule setup_deploy_trigger.sh installs matches this exact
-// canonical path with no '..' segments, so exec() below must pass the
-// same string or sudo will refuse it.
-$gitDeployScript = realpath(__DIR__ . '/../setup/git_deploy.sh');
-if ($gitDeployScript === false) {
+// This file runs from a *copy* of web/ under the nginx web root (see
+// deploy_web.sh) — not from the git checkout — so it can't find
+// git_deploy.sh by walking up from its own __DIR__. Read the path
+// setup_deploy_trigger.sh resolved and recorded instead. That setup script
+// wrote it via realpath(), the same canonical form the sudoers rule was
+// installed for, so exec() below matches it exactly.
+if (!is_file(GIT_DEPLOY_SCRIPT_PATH_FILE)) {
+    fail(500, 'Deploy trigger is not configured on this Pi — run setup/setup_deploy_trigger.sh.');
+}
+$gitDeployScript = trim((string) file_get_contents(GIT_DEPLOY_SCRIPT_PATH_FILE));
+if ($gitDeployScript === '' || !is_file($gitDeployScript)) {
     fail(500, 'git_deploy.sh not found — check the checkout is intact.');
 }
 

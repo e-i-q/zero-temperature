@@ -38,6 +38,7 @@ declare(strict_types=1);
 
 const WEBHOOK_SECRET_FILE = '/etc/git-deploy/webhook_secret';
 const DEPLOY_TOKEN_FILE = '/etc/git-deploy/token';
+const GIT_DEPLOY_SCRIPT_PATH_FILE = '/etc/git-deploy/git_deploy_script';
 const DEPLOY_LOG_FILE = '/var/log/git-deploy.log';
 const BRANCH_REF = 'refs/heads/main';
 const FLEET_REQUEST_TIMEOUT_SECONDS = 60; // a Pi Zero's own pull+redeploy runs synchronously before it responds
@@ -46,12 +47,17 @@ set_time_limit(300); // runs after the response is sent — see fastcgi_finish_r
 
 require __DIR__ . '/db.php'; // for fail() and db()
 
-// realpath(), not a literal __DIR__ . '/../../setup/...' concatenation —
-// the sudoers rule setup_deploy_webhook.sh installs matches this exact
-// canonical path with no '..' segments, so exec() below must pass the
-// same string or sudo will refuse it.
-$gitDeployScript = realpath(__DIR__ . '/../../setup/git_deploy.sh');
-if ($gitDeployScript === false) {
+// This file runs from a *copy* of web/ under the nginx web root (see
+// deploy_web.sh) — not from the git checkout — so it can't find
+// git_deploy.sh by walking up from its own __DIR__. Read the path
+// setup_deploy_webhook.sh resolved and recorded instead. That setup script
+// wrote it via realpath(), the same canonical form the sudoers rule was
+// installed for, so exec() below matches it exactly.
+if (!is_file(GIT_DEPLOY_SCRIPT_PATH_FILE)) {
+    fail(500, 'Deploy webhook is not configured — run setup/setup_deploy_webhook.sh.');
+}
+$gitDeployScript = trim((string) file_get_contents(GIT_DEPLOY_SCRIPT_PATH_FILE));
+if ($gitDeployScript === '' || !is_file($gitDeployScript)) {
     fail(500, 'git_deploy.sh not found — check the checkout is intact.');
 }
 

@@ -11,6 +11,12 @@
 # token for every Pi Zero plus the Hive, like /etc/dht22-sync/token — but a
 # SEPARATE value from it, since deploy and sync are different privileges.
 #
+# Also writes /etc/git-deploy/git_deploy_script (same permissions) — not a
+# secret, the resolved absolute path to this checkout's setup/git_deploy.sh,
+# for deploy_trigger.php to read at request time (it runs from a copy of
+# web/ under the nginx web root, so it can't find this script by walking up
+# from its own location).
+#
 # Also installs a narrow NOPASSWD sudo rule so www-data (running
 # deploy_trigger.php) can run exactly setup/git_deploy.sh as root — needed
 # because deploy_web.sh's own `sudo cp`/`sudo chown` calls need root, and
@@ -29,6 +35,7 @@ source "${SCRIPT_DIR}/lib/log.sh"
 
 CONF_DIR="/etc/git-deploy"
 TOKEN_FILE="${CONF_DIR}/token"
+GIT_DEPLOY_SCRIPT_PATH_FILE="${CONF_DIR}/git_deploy_script"
 LOG_FILE="${LOG_FILE:-/var/log/git-deploy.log}"
 WEB_USER="${WEB_USER:-www-data}"    # runs deploy_trigger.php (PHP-FPM pool user)
 WEB_GROUP="${WEB_GROUP:-www-data}"  # group allowed to read the token file
@@ -61,11 +68,12 @@ setup_log_file() {
 
 setup_sudoers() {
   [[ -f "$GIT_DEPLOY_SCRIPT" ]] || error "git_deploy.sh not found at ${GIT_DEPLOY_SCRIPT}."
-  # realpath, not the cd+pwd path above — deploy_trigger.php resolves this
-  # same file via PHP's realpath() (always physical, symlinks resolved)
-  # before exec()'ing it, and sudo matches this rule by exact argv string.
-  # bash's own `pwd` is logical by default, so if any ancestor directory is
-  # a symlink the two could disagree; realpath here keeps them identical.
+  # realpath, not the cd+pwd path above — deploy_trigger.php exec()'s this
+  # same path (read back from GIT_DEPLOY_SCRIPT_PATH_FILE below, not
+  # recomputed from its own location — see that file's docstring for why),
+  # and sudo matches this rule by exact argv string. bash's own `pwd` is
+  # logical by default, so if any ancestor directory is a symlink the two
+  # could disagree; realpath here keeps them identical.
   GIT_DEPLOY_SCRIPT="$(realpath "$GIT_DEPLOY_SCRIPT")"
 
   local rule="${WEB_USER} ALL=(root) NOPASSWD: /usr/bin/bash ${GIT_DEPLOY_SCRIPT}"
@@ -79,6 +87,16 @@ setup_sudoers() {
 
   mv "${SUDOERS_FILE}.tmp" "$SUDOERS_FILE"
   success "Sudo rule installed: ${SUDOERS_FILE} (${WEB_USER} may run git_deploy.sh as root, no password)"
+
+  # deploy_trigger.php runs from a *copy* of web/ under the nginx web root
+  # (see deploy_web.sh), not from this checkout — so it can't find
+  # git_deploy.sh by walking up from its own __DIR__ at request time. Record
+  # the resolved path here instead, next to the token above, so it reads
+  # the same canonical string this sudoers rule was written for.
+  printf '%s\n' "$GIT_DEPLOY_SCRIPT" > "$GIT_DEPLOY_SCRIPT_PATH_FILE"
+  chown "root:${WEB_GROUP}" "$GIT_DEPLOY_SCRIPT_PATH_FILE"
+  chmod 640 "$GIT_DEPLOY_SCRIPT_PATH_FILE"
+  success "Recorded git_deploy.sh path for deploy_trigger.php: ${GIT_DEPLOY_SCRIPT_PATH_FILE}"
 }
 
 print_summary() {
