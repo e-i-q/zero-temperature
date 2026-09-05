@@ -58,6 +58,7 @@ WEB_USER="${WEB_USER:-www-data}"    # runs deploy_webhook.php (PHP-FPM pool user
 WEB_GROUP="${WEB_GROUP:-www-data}"  # group allowed to read the secrets below
 SUDOERS_FILE="/etc/sudoers.d/git-deploy-rpi5"
 GIT_DEPLOY_SCRIPT="${SCRIPT_DIR}/git_deploy.sh"
+RUN_USER="${RUN_USER:-$(stat -c '%U' "${REPO_DIR}/.git")}"  # owns the checkout — see git_deploy.sh
 
 WEBHOOK_SECRET="${WEBHOOK_SECRET:-}"
 DEPLOY_TOKEN="${DEPLOY_TOKEN:-}"
@@ -119,6 +120,38 @@ setup_log_file() {
   success "Log file ready: ${LOG_FILE}"
 }
 
+# grant_checkout_traversal — let WEB_USER (www-data) reach GIT_DEPLOY_SCRIPT
+# even when the checkout lives under RUN_USER's home directory.
+#
+# Home directories default to mode 750 on Debian/Raspberry Pi OS — owner
+# rwx, group/other nothing — so www-data can't even traverse *into* it,
+# regardless of the script file's own permissions. deploy_webhook.php's
+# is_file() check then fails exactly as if git_deploy.sh didn't exist.
+# Discovered the hard way: fixed manually once, then it recurred on every
+# new checkout, so it belongs here instead of a one-off `chmod`.
+#
+# Grants execute (traversal only — not read/listing) on every ancestor
+# directory of GIT_DEPLOY_SCRIPT that RUN_USER owns, stopping the moment
+# an ancestor belongs to someone else (e.g. /home, owned by root) — so
+# this never reaches outside the checkout owner's own tree.
+#
+# Sets BOTH group and "other" bits, not just "other": if WEB_USER is ever
+# a member of RUN_USER's primary group (it was, on one Pi Zero in the
+# field — added for an unrelated reason), the kernel's permission check
+# uses whichever bucket matches first, so granting only one of the two
+# isn't reliable.
+grant_checkout_traversal() {
+  local dir parent
+  dir="$(dirname "$GIT_DEPLOY_SCRIPT")"
+  while [[ "$(stat -c '%U' "$dir")" == "$RUN_USER" ]]; do
+    chmod g+x,o+x "$dir"
+    parent="$(dirname "$dir")"
+    [[ "$parent" == "$dir" ]] && break
+    dir="$parent"
+  done
+  success "Ensured ${WEB_USER} can traverse to ${GIT_DEPLOY_SCRIPT}."
+}
+
 setup_sudoers() {
   [[ -f "$GIT_DEPLOY_SCRIPT" ]] || error "git_deploy.sh not found at ${GIT_DEPLOY_SCRIPT}."
   # realpath, not the cd+pwd path above — deploy_webhook.php exec()'s this
@@ -128,6 +161,7 @@ setup_sudoers() {
   # logical by default, so if any ancestor directory is a symlink the two
   # could disagree; realpath here keeps them identical.
   GIT_DEPLOY_SCRIPT="$(realpath "$GIT_DEPLOY_SCRIPT")"
+  grant_checkout_traversal
 
   local rule="${WEB_USER} ALL=(root) NOPASSWD: /usr/bin/bash ${GIT_DEPLOY_SCRIPT}"
   echo "$rule" > "${SUDOERS_FILE}.tmp"
