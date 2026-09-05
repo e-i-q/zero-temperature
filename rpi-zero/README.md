@@ -32,12 +32,15 @@ failing. Nothing needs to be done by hand to catch back up: see
 | `web/index.html`, `web/css/`, `web/js/` | Dashboard: live readings, min/max/avg stats, timeline chart with sunrise/sunset markers |
 | `web/readings.php` | JSON API the dashboard polls; queries the SQLite database read-only |
 | `web/sync.php` | Runs `sync_backlog.py` on demand, gated by a shared secret — see "Manual sync trigger (from the Hive)" below |
+| `web/deploy_trigger.php` | Pulls + redeploys this Pi Zero on demand, gated by a shared secret — see "Push-to-deploy (from the Hive)" below |
 | `setup/setup_sqlite_ramdisk.sh` | Mounts a tmpfs RAM disk for the SQLite DB, with daily SD backup + restore-on-boot |
 | `setup/setup_nginx_php.sh` | Installs and configures nginx + PHP-FPM (with `pdo_sqlite`) |
 | `setup/setup_dht22_logger.sh` | Installs Python deps and a cron job that runs the logger periodically |
 | `setup/setup_ups_ina219.sh` | Installs Python deps, enables I2C, and a cron job that runs the UPS monitor periodically |
 | `setup/setup_sync_trigger.sh` | Provisions `web/sync.php`'s shared secret and script/DB paths |
 | `setup/deploy_web.sh` | Syncs `web/` into the nginx web root |
+| `setup/git_deploy.sh` | Pulls the latest `main` and re-runs `deploy_web.sh` — what `deploy_trigger.php` actually runs |
+| `setup/setup_deploy_trigger.sh` | Provisions `web/deploy_trigger.php`'s shared secret and the sudo rule it needs to redeploy as root |
 | `setup/lib/log.sh` | Shared colored logging + quiet-by-default install output for the scripts above |
 
 ## Hardware
@@ -146,6 +149,26 @@ separate step beyond `deploy_web.sh`. Without this setup, the Settings
 tab's button for this sensor just reports the trigger isn't configured;
 everything else (the automatic offline→online sync) keeps working
 regardless.
+
+## Push-to-deploy (from the Hive)
+
+Optional: have this Pi Zero redeploy itself automatically whenever `main`
+is pushed, instead of SSHing in and pulling by hand. This Pi Zero isn't
+reachable from the internet itself — the Hive is the only Pi with a port
+forwarded, so it's the one GitHub's webhook reaches, and it relays a
+deploy trigger here over the LAN. See `../rpi5/README.md`'s
+"Push-to-deploy" section for the full setup — **run
+`rpi5/setup/setup_deploy_webhook.sh` there first**, it prints a
+`DEPLOY_TOKEN` value this Pi needs:
+
+```bash
+sudo DEPLOY_TOKEN=<token printed on the Hive> bash setup/setup_deploy_trigger.sh
+```
+
+`web/deploy_trigger.php` itself is deployed like any other file under
+`web/` — no separate step beyond `deploy_web.sh`. Without this setup, a
+push still redeploys the Hive; this Pi Zero just doesn't get the relay and
+needs deploying by hand, same as before.
 
 ## Why SQLite on a RAM disk?
 

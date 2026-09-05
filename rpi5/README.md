@@ -32,9 +32,12 @@ PostgreSQL (Hive, this Pi)  →  api/readings.php, api/daily.php  →  dashboard
 | `web/api/forecast.php` | JSON API: Open-Meteo hourly forecast (temperature/humidity/wind/condition) for the Forecast tab. No database — a cached proxy, same pattern as `../rpi-zero/web/weather.php` |
 | `web/api/settings.php` | JSON API backing the Settings tab: password-profile login/create/save/logout, session-cookie-backed. See its docstring |
 | `web/api/sync_trigger.php` | JSON API backing the Settings tab's "Sync Now" buttons: relays a manual backlog-sync request to a specific Pi Zero's `web/sync.php`. See its docstring |
+| `web/api/deploy_webhook.php` | GitHub push webhook receiver: pulls + redeploys the Hive, then relays a deploy trigger to every Pi Zero. See "Push-to-deploy" below |
 | `setup/setup_nginx_php.sh` | Installs and configures nginx + PHP-FPM (with `pdo_pgsql`) |
 | `setup/deploy_web.sh` | Syncs `web/` into the nginx web root |
+| `setup/git_deploy.sh` | Pulls the latest `main` and re-runs `deploy_web.sh` — what `deploy_webhook.php` actually runs |
 | `setup/setup_sync_trigger.sh` | Provisions the shared secret used to authenticate `sync_trigger.php`'s requests to each Pi Zero |
+| `setup/setup_deploy_webhook.sh` | Provisions push-to-deploy: the GitHub webhook secret, the fleet-wide deploy token, and the sudo rule `deploy_webhook.php` needs to redeploy as root |
 | `setup/lib/log.sh` | Shared colored logging + quiet-by-default install output for the scripts above |
 
 ## Setup (Raspberry Pi 5)
@@ -82,6 +85,40 @@ sudo chmod 600 "$(getent passwd www-data | cut -d: -f6)/.pgpass"
 ```
 
 After setup, the dashboard is served at `http://<pi5-address>/`.
+
+## Push-to-deploy
+
+Optional: redeploy the whole fleet (this Pi + every Pi Zero) automatically
+whenever `main` is pushed, instead of SSHing into each device and pulling
+by hand. The Hive is the only Pi meant to be reachable from the internet —
+one port forwarded on your router, pointed here — so GitHub's webhook
+always lands on this Pi, which redeploys itself and then relays the same
+trigger to every Pi Zero over the LAN (using each sensor's `ip_address`
+from the database, same lookup `api/sync_trigger.php` uses for "Sync
+Now").
+
+```bash
+sudo bash setup/setup_deploy_webhook.sh
+```
+
+This prints two things you still need to do by hand:
+
+1. **Add a webhook in GitHub** (repo Settings → Webhooks → Add webhook)
+   pointing at `http://<your-public-ip-or-ddns-name>/api/deploy_webhook.php`,
+   content type `application/json`, secret = the webhook secret it printed,
+   event = just `push`. GitHub sends a `ping` first, answered instantly
+   without deploying anything, so "Recent Deliveries" confirms the webhook
+   is wired up correctly before the first real push.
+2. **Run `rpi-zero/setup/setup_deploy_trigger.sh` on every Pi Zero**, with
+   the (different) deploy token it printed — this is what lets the Hive's
+   relay reach that Pi Zero.
+
+From then on, a push to `main` redeploys everything within a few seconds,
+logged to `/var/log/git-deploy.log` on this Pi (`tail -f` it to watch a
+deploy happen, or to debug a Pi Zero the relay couldn't reach). This only
+ever fast-forwards (`git merge --ff-only`) — a checkout that's diverged
+from `origin/main` (e.g. a commit made directly on a Pi) fails loudly
+instead of being silently overwritten.
 
 ## Notes on scope
 
