@@ -71,6 +71,25 @@ def update_status(conn, hostname: str, status: str) -> None:
     conn.commit()
 
 
+def update_uptime(conn, hostname: str, uptime_seconds: int) -> None:
+    """Set this Pi's `uptime_seconds` in the remote `sensors` table — how
+    long it's been since this Pi last booted, shown per sensor on the Hive
+    dashboard's Settings tab (Sensors section). Same upsert shape as
+    update_status() above: if this Pi doesn't have a `sensors` row yet, the
+    INSERT branch creates a placeholder one rather than silently doing
+    nothing."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO sensors (name, description, uptime_seconds)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (name) DO UPDATE SET uptime_seconds = EXCLUDED.uptime_seconds
+            """,
+            (hostname, f"Auto-registered by uptime_reporter.py on {hostname}", uptime_seconds),
+        )
+    conn.commit()
+
+
 def local_hostname() -> str:
     """Equivalent of `uname -n` — used as this RPi's name in the remote `sensors` table."""
     return os.uname().nodename

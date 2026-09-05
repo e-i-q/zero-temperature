@@ -38,7 +38,7 @@
   ];
 
   let currentRange = localStorage.getItem(RANGE_STORAGE_KEY) || '24h';
-  let sensors = [];        // [{id, name, description, online, latest, stats}]
+  let sensors = [];        // [{id, name, description, online, latest, stats, status, uptime_seconds}]
   let series = {};         // { sensorId: [{recorded_at, temperature_c, humidity_pct, sample_count}] }
   let dailySeries = {};    // { sensorId: [{day, temp_avg, temp_min, temp_max}] }
   let hidden = new Set();  // sensor ids toggled off via the legend
@@ -1292,11 +1292,28 @@
     saveSensorLabel(input.closest('.label-item'));
   });
 
+  // Renders seconds-since-boot (sensors.uptime_seconds, from
+  // uptime_reporter.py — see db/database/sensors/tables/sensors.md) as a
+  // compact "3d 4h" / "5h 12m" / "42m" string. Coarsest-two-units only —
+  // this is a Settings-tab glance, not a stopwatch.
+  function formatUptime(seconds) {
+    if (seconds === null || seconds === undefined) return 'no uptime on file';
+    seconds = Math.max(0, Math.floor(seconds));
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    if (days > 0) return `up ${days}d ${hours}h`;
+    if (hours > 0) return `up ${hours}h ${minutes}m`;
+    return `up ${minutes}m`;
+  }
+
   // -- Manual sync trigger (per-sensor "Sync Now") -----------------------------
   // Only meaningful for a Pi Zero that's fallen behind (e.g. taken offline
   // on battery) — see api/sync_trigger.php and rpi-zero/web/sync.php, which
   // this actually calls. Shown regardless of online/offline status: the
   // whole point is usually catching a sensor up right after it comes back.
+  // Also doubles as the Sensors section's uptime display (sensors.uptime_seconds,
+  // from uptime_reporter.py) — same per-sensor row, no need for a second list.
   function renderSyncList() {
     const list = el('sync-list');
     if (!list) return;
@@ -1317,6 +1334,10 @@
       ip.className = 'sync-item-ip';
       ip.textContent = s.ip_address || 'no IP on file';
 
+      const uptime = document.createElement('span');
+      uptime.className = 'sync-item-uptime';
+      uptime.textContent = formatUptime(s.uptime_seconds);
+
       const spacer = document.createElement('span');
       spacer.className = 'sync-item-spacer';
 
@@ -1330,7 +1351,7 @@
       result.className = 'sync-item-result';
       result.hidden = true;
 
-      li.append(name, badge, ip, spacer, btn, result);
+      li.append(name, badge, ip, uptime, spacer, btn, result);
       list.appendChild(li);
     });
   }

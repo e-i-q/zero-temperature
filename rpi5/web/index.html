@@ -201,11 +201,14 @@
               </p>
               <ul class="label-list" id="label-list"></ul>
 
-              <p class="settings-status">Manual sync trigger:</p>
+              <p class="settings-status">Sensors:</p>
               <p class="settings-current">
-                Only useful for a Pi Zero that's been offline — asks it to push
-                any local readings not yet in this database. See
-                rpi-zero/web/sync.php.
+                Each Pi Zero's online/offline status, LAN address, and uptime
+                since it last booted (from that Pi's own uptime-reporter cron
+                job, every 5 minutes). "Sync Now" is only useful for a Pi Zero
+                that's been offline — it asks that Pi to push any local
+                readings not yet in this database. See
+                rpi-zero/python/uptime_reporter.py and rpi-zero/web/sync.php.
               </p>
               <ul class="sync-list" id="sync-list"></ul>
             </div>

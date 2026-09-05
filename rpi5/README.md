@@ -144,6 +144,12 @@ instead of being silently overwritten.
   needs a UPS HAT). An offline sensor still shows OFFLINE regardless of its
   last-known status; a sensor with no UPS HAT (or `status` not yet written)
   shows OK once online, same as before this column existed.
+- **Sensor uptime**: the Settings tab's Sensors section shows each Pi Zero's
+  uptime since it last booted (e.g. "3d 4h"), next to its online/offline
+  badge and LAN address, driven by the `sensors.uptime_seconds` column — see
+  `../rpi-zero/README.md`'s "Uptime reporting" section for the Pi Zero side
+  (`uptime_reporter.py`, a cron job every 5 minutes). A sensor that's never
+  run the reporter shows "no uptime on file".
 - **Forecast tab**: `forecast.php` reuses the Overview tab's range-chip UI
   (12H/24H/2D/5D/1M/ALL) so both tabs feel the same, but it's inherently a
   forward-looking window — Open-Meteo's free `/v1/forecast` endpoint only

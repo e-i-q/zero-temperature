@@ -414,6 +414,12 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
   color: var(--color-text-muted);
 }
 
+.sync-item-uptime {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
 .sync-item-badge {
   font: 400 9px var(--font-mono);
   letter-spacing: 0.04em;
