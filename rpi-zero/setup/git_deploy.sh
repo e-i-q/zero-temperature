@@ -20,6 +20,12 @@
 # setup_dht22_logger.sh), so a plain git pull is all they ever need; there's
 # nothing to restart.
 #
+# Also reports the newly-deployed commit (hash/summary/date) to the Hive
+# database via python/report_version.py, shown per sensor on the Hive
+# dashboard's Settings tab — best-effort, a failed report never fails the
+# deploy itself (the commit that landed is still the source of truth; the
+# report can be re-run by hand, see that script's docstring).
+#
 # USAGE:
 #   bash setup/git_deploy.sh
 # =============================================================================
@@ -36,13 +42,14 @@ RUN_USER="${RUN_USER:-$(stat -c '%U' "${REPO_DIR}/.git")}"
 # deploy_trigger.php) — run directly when it's already RUN_USER, e.g. a
 # manual `bash git_deploy.sh` by whoever owns the checkout, so that case
 # never hits an unrelated self-sudo password prompt.
-git_as() {
+run_as() {
   if [[ "$(whoami)" == "$RUN_USER" ]]; then
-    git -C "$REPO_DIR" "$@"
+    "$@"
   else
-    sudo -u "$RUN_USER" git -C "$REPO_DIR" "$@"
+    sudo -u "$RUN_USER" "$@"
   fi
 }
+git_as() { run_as git -C "$REPO_DIR" "$@"; }
 
 check_branch() {
   local current
@@ -70,6 +77,14 @@ main() {
   git_as merge --ff-only "origin/${BRANCH}"
 
   bash "${SCRIPT_DIR}/deploy_web.sh"
+
+  info "Reporting deployed commit to the Hive…"
+  # As RUN_USER, same as the git commands above — report_version.py needs
+  # RUN_USER's ~/.pgpass to authenticate as sensor_writer (see
+  # remote_db.py), which root (deploy_trigger.php's caller) doesn't have.
+  run_as python3 "${SCRIPT_DIR}/../python/report_version.py" \
+    || warn "Could not report deployed version to the Hive (non-fatal; the deploy itself succeeded)."
+
   success "Deployed ${remote_sha:0:8}."
 }
 

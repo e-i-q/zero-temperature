@@ -90,6 +90,29 @@ def update_uptime(conn, hostname: str, uptime_seconds: int) -> None:
     conn.commit()
 
 
+def update_version(conn, hostname: str, commit_hash: str, commit_summary: str, commit_date: str) -> None:
+    """Set this Pi's `commit_hash`/`commit_summary`/`commit_date` in the
+    remote `sensors` table — which git commit this Pi is currently deployed
+    at, shown per sensor on the Hive dashboard's Settings tab (Sensors
+    section). Same upsert shape as update_uptime() above: if this Pi
+    doesn't have a `sensors` row yet, the INSERT branch creates a
+    placeholder one rather than silently doing nothing."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO sensors (name, description, commit_hash, commit_summary, commit_date)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (name) DO UPDATE SET
+                commit_hash = EXCLUDED.commit_hash,
+                commit_summary = EXCLUDED.commit_summary,
+                commit_date = EXCLUDED.commit_date
+            """,
+            (hostname, f"Auto-registered by report_version.py on {hostname}",
+             commit_hash, commit_summary, commit_date),
+        )
+    conn.commit()
+
+
 def local_hostname() -> str:
     """Equivalent of `uname -n` — used as this RPi's name in the remote `sensors` table."""
     return os.uname().nodename

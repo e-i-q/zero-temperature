@@ -40,6 +40,17 @@ function toIsoUtc(string $pgTimestamp): string {
     return str_replace(' ', 'T', $pgTimestamp) . 'Z';
 }
 
+// PostgreSQL TIMESTAMPTZ columns (unlike the bare TIMESTAMP ones above) DO
+// come back from PDO with a numeric UTC offset already attached (e.g.
+// "2026-09-05 12:34:56+00") — sensors.commit_date is the one column in this
+// schema that's TIMESTAMPTZ, since a git commit's author date carries its
+// own meaningful offset (see ../../../../db/database/sensors/tables/sensors.md).
+// DateTimeImmutable parses that shape natively, so this just reformats it to
+// unambiguous ISO-8601 rather than string-splicing like toIsoUtc() does.
+function toIsoTz(string $pgTimestamptz): string {
+    return (new DateTimeImmutable($pgTimestamptz))->format(DateTimeInterface::ATOM);
+}
+
 function db(): PDO {
     static $pdo = null;
     if ($pdo !== null) {

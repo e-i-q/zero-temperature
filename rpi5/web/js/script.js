@@ -38,7 +38,7 @@
   ];
 
   let currentRange = localStorage.getItem(RANGE_STORAGE_KEY) || '24h';
-  let sensors = [];        // [{id, name, description, online, latest, stats, status, uptime_seconds}]
+  let sensors = [];        // [{id, name, description, online, latest, stats, status, uptime_seconds, commit_hash, commit_summary, commit_date}]
   let series = {};         // { sensorId: [{recorded_at, temperature_c, humidity_pct, sample_count}] }
   let dailySeries = {};    // { sensorId: [{day, temp_avg, temp_min, temp_max}] }
   let hidden = new Set();  // sensor ids toggled off via the legend
@@ -1307,13 +1307,28 @@
     return `up ${minutes}m`;
   }
 
+  // Renders the currently-deployed git commit (sensors.commit_hash/
+  // commit_summary/commit_date, from report_version.py — see
+  // db/database/sensors/tables/sensors.md) as a compact "abc1234 · Fix
+  // thing · Sep 5" string. All three land together or not at all (see that
+  // reporter), so this only checks commit_hash.
+  function formatVersion(s) {
+    if (!s.commit_hash) return 'no version on file';
+    const date = s.commit_date
+      ? new Date(s.commit_date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+      : null;
+    return [s.commit_hash, s.commit_summary, date].filter(Boolean).join(' · ');
+  }
+
   // -- Manual sync trigger (per-sensor "Sync Now") -----------------------------
   // Only meaningful for a Pi Zero that's fallen behind (e.g. taken offline
   // on battery) — see api/sync_trigger.php and rpi-zero/web/sync.php, which
   // this actually calls. Shown regardless of online/offline status: the
   // whole point is usually catching a sensor up right after it comes back.
-  // Also doubles as the Sensors section's uptime display (sensors.uptime_seconds,
-  // from uptime_reporter.py) — same per-sensor row, no need for a second list.
+  // Also doubles as the Sensors section's uptime + deployed-version display
+  // (sensors.uptime_seconds from uptime_reporter.py, sensors.commit_hash/
+  // commit_summary/commit_date from report_version.py) — same per-sensor
+  // row, no need for a second/third list.
   function renderSyncList() {
     const list = el('sync-list');
     if (!list) return;
@@ -1338,6 +1353,11 @@
       uptime.className = 'sync-item-uptime';
       uptime.textContent = formatUptime(s.uptime_seconds);
 
+      const version = document.createElement('span');
+      version.className = 'sync-item-version';
+      version.textContent = formatVersion(s);
+      version.title = s.commit_summary || '';
+
       const spacer = document.createElement('span');
       spacer.className = 'sync-item-spacer';
 
@@ -1351,7 +1371,7 @@
       result.className = 'sync-item-result';
       result.hidden = true;
 
-      li.append(name, badge, ip, uptime, spacer, btn, result);
+      li.append(name, badge, ip, uptime, version, spacer, btn, result);
       list.appendChild(li);
     });
   }

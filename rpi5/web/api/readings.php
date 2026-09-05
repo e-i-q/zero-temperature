@@ -67,7 +67,7 @@ $pdo = db();
 // readings in this window, so the dashboard can still render an offline
 // tile for them instead of silently dropping them. --------------------------
 try {
-    $sensors = $pdo->query('SELECT id, name, description, ip_address, status, uptime_seconds FROM sensors ORDER BY name')->fetchAll();
+    $sensors = $pdo->query('SELECT id, name, description, ip_address, status, uptime_seconds, commit_hash, commit_summary, commit_date FROM sensors ORDER BY name')->fetchAll();
 } catch (PDOException $e) {
     fail(500, 'Could not read sensor registry: ' . $e->getMessage());
 }
@@ -146,6 +146,15 @@ foreach ($sensors as $s) {
         // section (script.js's formatUptime()), not per-tile — unlike
         // `status`, it isn't relevant to the Overview tab's at-a-glance view.
         'uptime_seconds' => $s['uptime_seconds'] !== null ? (int) $s['uptime_seconds'] : null,
+        // Currently-deployed git commit on this sensor Pi, from
+        // report_version.py's remote_db.update_version() — see
+        // ../../../../db/database/sensors/tables/sensors.md. Null (all
+        // three together) if that reporter has never run here. Shown on
+        // the Settings tab's Sensors section (script.js), same place as
+        // uptime_seconds above.
+        'commit_hash'    => $s['commit_hash'],
+        'commit_summary' => $s['commit_summary'],
+        'commit_date'    => $s['commit_date'] !== null ? toIsoTz($s['commit_date']) : null,
         'online'      => $online,
         'latest'      => $latest,
         'stats'       => $temps ? [

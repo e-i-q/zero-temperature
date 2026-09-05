@@ -28,7 +28,8 @@ failing. Nothing needs to be done by hand to catch back up: see
 | `python/dht22_logger.py` | Reads the DHT22, averages multiple samples, writes a row to SQLite, mirrors it live to the central DB |
 | `python/ups_ina219.py` | Reads the INA219-based UPS HAT and writes this Pi's live power status to the central DB — see "UPS battery status" below |
 | `python/uptime_reporter.py` | Reads this Pi's own system uptime and writes it to the central DB — see "Uptime reporting" below |
-| `python/remote_db.py` | Shared PostgreSQL connection/config, used by `dht22_logger.py`, `ups_ina219.py`, `uptime_reporter.py` and `sync_backlog.py` |
+| `python/report_version.py` | Reads this Pi's currently-deployed git commit and writes it to the central DB — see "Version reporting" below |
+| `python/remote_db.py` | Shared PostgreSQL connection/config, used by `dht22_logger.py`, `ups_ina219.py`, `uptime_reporter.py`, `report_version.py` and `sync_backlog.py` |
 | `python/sync_backlog.py` | Pushes any local readings not yet confirmed on the central DB — see "Offline backlog sync" below |
 | `web/index.html`, `web/css/`, `web/js/` | Dashboard: live readings, min/max/avg stats, timeline chart with sunrise/sunset markers |
 | `web/readings.php` | JSON API the dashboard polls; queries the SQLite database read-only |
@@ -41,7 +42,7 @@ failing. Nothing needs to be done by hand to catch back up: see
 | `setup/setup_uptime_reporter.sh` | Installs Python deps and a cron job that runs the uptime reporter every 5 minutes |
 | `setup/setup_sync_trigger.sh` | Provisions `web/sync.php`'s shared secret and script/DB paths |
 | `setup/deploy_web.sh` | Syncs `web/` into the nginx web root |
-| `setup/git_deploy.sh` | Pulls the latest `main` and re-runs `deploy_web.sh` — what `deploy_trigger.php` actually runs |
+| `setup/git_deploy.sh` | Pulls the latest `main`, re-runs `deploy_web.sh`, and reports the new commit to the Hive — what `deploy_trigger.php` actually runs |
 | `setup/setup_deploy_trigger.sh` | Provisions `web/deploy_trigger.php`'s shared secret and the sudo rule it needs to redeploy as root |
 | `setup/lib/log.sh` | Shared colored logging + quiet-by-default install output for the scripts above |
 
@@ -125,6 +126,26 @@ as `dht22_logger.py` for the `sensor_writer` role.
 
 ```bash
 sudo bash setup/setup_uptime_reporter.sh   # installs deps, cron job
+```
+
+## Version reporting
+
+`python/report_version.py` reports the git commit this Pi is currently
+deployed at — short hash, subject line and author date — into the central
+database's `sensors.commit_hash` / `commit_summary` / `commit_date`
+columns, shown per sensor on the Hive dashboard's Settings tab, Sensors
+section (`../rpi5`).
+
+Unlike the uptime reporter above this isn't a cron job: `setup/git_deploy.sh`
+runs it once, automatically, right after every successful pull + redeploy
+(see "Push-to-deploy" below) — there's nothing new to report until the code
+actually changes. It needs the same central-DB columns set up first (see
+`../../db/database/sensors/tables/sensors.md`), and the same `~/.pgpass`
+entry as `dht22_logger.py` for the `sensor_writer` role. You can also run it
+by hand at any time to refresh the Hive's record without a full redeploy:
+
+```bash
+python3 python/report_version.py
 ```
 
 ## Offline backlog sync

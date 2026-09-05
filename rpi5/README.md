@@ -150,6 +150,13 @@ instead of being silently overwritten.
   `../rpi-zero/README.md`'s "Uptime reporting" section for the Pi Zero side
   (`uptime_reporter.py`, a cron job every 5 minutes). A sensor that's never
   run the reporter shows "no uptime on file".
+- **Sensor version**: the same Sensors section also shows each Pi Zero's
+  currently-deployed code version (short commit hash · summary · date),
+  driven by the `sensors.commit_hash`/`commit_summary`/`commit_date`
+  columns — see `../rpi-zero/README.md`'s "Version reporting" section for
+  the Pi Zero side (`report_version.py`, run once per push-to-deploy, not on
+  a timer). A sensor that's never run the reporter shows "no version on
+  file".
 - **Forecast tab**: `forecast.php` reuses the Overview tab's range-chip UI
   (12H/24H/2D/5D/1M/ALL) so both tabs feel the same, but it's inherently a
   forward-looking window — Open-Meteo's free `/v1/forecast` endpoint only

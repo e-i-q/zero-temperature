@@ -203,12 +203,15 @@
 
               <p class="settings-status">Sensors:</p>
               <p class="settings-current">
-                Each Pi Zero's online/offline status, LAN address, and uptime
+                Each Pi Zero's online/offline status, LAN address, uptime
                 since it last booted (from that Pi's own uptime-reporter cron
-                job, every 5 minutes). "Sync Now" is only useful for a Pi Zero
-                that's been offline — it asks that Pi to push any local
+                job, every 5 minutes), and the code version it's currently
+                running (hash · commit summary · date, reported right after
+                its last push-to-deploy). "Sync Now" is only useful for a Pi
+                Zero that's been offline — it asks that Pi to push any local
                 readings not yet in this database. See
-                rpi-zero/python/uptime_reporter.py and rpi-zero/web/sync.php.
+                rpi-zero/python/uptime_reporter.py,
+                rpi-zero/python/report_version.py and rpi-zero/web/sync.php.
               </p>
               <ul class="sync-list" id="sync-list"></ul>
             </div>
