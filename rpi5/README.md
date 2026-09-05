@@ -32,6 +32,7 @@ PostgreSQL (Hive, this Pi)  →  api/readings.php, api/daily.php  →  dashboard
 | `web/api/forecast.php` | JSON API: Open-Meteo hourly forecast (temperature/humidity/wind/condition) for the Forecast tab. No database — a cached proxy, same pattern as `../rpi-zero/web/weather.php` |
 | `web/api/settings.php` | JSON API backing the Settings tab: password-profile login/create/save/logout, session-cookie-backed. See its docstring |
 | `web/api/sync_trigger.php` | JSON API backing the Settings tab's "Sync Now" buttons: relays a manual backlog-sync request to a specific Pi Zero's `web/sync.php`. See its docstring |
+| `web/api/deploy_trigger.php` | JSON API backing the Settings tab's "Update Now" buttons: relays a manual pull+redeploy request to a specific Pi Zero's `web/deploy_trigger.php`. See its docstring |
 | `web/api/deploy_webhook.php` | GitHub push webhook receiver: pulls + redeploys the Hive, then relays a deploy trigger to every Pi Zero. See "Push-to-deploy" below |
 | `setup/setup_nginx_php.sh` | Installs and configures nginx + PHP-FPM (with `pdo_pgsql`) |
 | `setup/deploy_web.sh` | Syncs `web/` into the nginx web root |
@@ -120,6 +121,11 @@ ever fast-forwards (`git merge --ff-only`) — a checkout that's diverged
 from `origin/main` (e.g. a commit made directly on a Pi) fails loudly
 instead of being silently overwritten.
 
+The same per-Pi-Zero step (`setup_deploy_trigger.sh`) also unlocks the
+Settings tab's per-sensor "Update Now" button — see "Settings tab — manual
+deploy trigger" below — for redeploying one sensor on demand instead of
+waiting for the next push.
+
 ## Notes on scope
 
 - **Ranges**: 12H / 24H / 2D / 5D / 1M / ALL by default — editable per
@@ -205,3 +211,12 @@ instead of being silently overwritten.
   `rpi-zero/setup/setup_sync_trigger.sh` on each Pi Zero you want this to
   work for, sharing one token across the fleet. A sensor with no
   `sensors.ip_address` on file yet falls back to `<name>.local` (mDNS).
+- **Settings tab — manual deploy trigger**: the same per-sensor row also has
+  an "Update Now" button. Clicking one asks `api/deploy_trigger.php` to
+  relay a request to that Pi Zero's own `web/deploy_trigger.php`, which
+  pulls the latest `main` and redeploys there — the same thing a push to
+  `main` triggers fleet-wide via `api/deploy_webhook.php` (see
+  "Push-to-deploy" below), just for one sensor on demand instead of waiting
+  for the next push (or for a sensor that missed that push's relay, e.g. it
+  was offline at the time). Reuses that same push-to-deploy setup and
+  shared token — no separate provisioning step.

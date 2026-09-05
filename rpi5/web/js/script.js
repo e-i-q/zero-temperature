@@ -4,6 +4,7 @@
   const FORECAST_URL = 'api/forecast.php';
   const SETTINGS_URL = 'api/settings.php';
   const SYNC_TRIGGER_URL = 'api/sync_trigger.php';
+  const DEPLOY_TRIGGER_URL = 'api/deploy_trigger.php';
   const REFRESH_MS = 60000; // poll for new data every minute
   const FORECAST_REFRESH_MS = REFRESH_MS * 5; // forecast.php itself caches Open-Meteo for 30min
   const RANGE_STORAGE_KEY = 'hiveRange';
@@ -1320,11 +1321,16 @@
     return [s.commit_hash, s.commit_summary, date].filter(Boolean).join(' · ');
   }
 
-  // -- Manual sync trigger (per-sensor "Sync Now") -----------------------------
-  // Only meaningful for a Pi Zero that's fallen behind (e.g. taken offline
-  // on battery) — see api/sync_trigger.php and rpi-zero/web/sync.php, which
-  // this actually calls. Shown regardless of online/offline status: the
-  // whole point is usually catching a sensor up right after it comes back.
+  // -- Manual sync + deploy triggers ("Sync Now" / "Update Now") --------------
+  // "Sync Now" is only meaningful for a Pi Zero that's fallen behind (e.g.
+  // taken offline on battery) — see api/sync_trigger.php and
+  // rpi-zero/web/sync.php, which this actually calls. "Update Now" pulls +
+  // redeploys that one sensor on demand — see api/deploy_trigger.php and
+  // rpi-zero/web/deploy_trigger.php — for a sensor that missed the
+  // automatic fleet-wide relay a push normally triggers (api/deploy_webhook.php),
+  // or one you don't want to wait on. Both shown regardless of online/offline
+  // status: the whole point of either is usually catching a sensor up right
+  // after (or before) it comes back.
   // Also doubles as the Sensors section's uptime + deployed-version display
   // (sensors.uptime_seconds from uptime_reporter.py, sensors.commit_hash/
   // commit_summary/commit_date from report_version.py) — same per-sensor
@@ -1367,11 +1373,17 @@
       btn.dataset.sensor = s.name;
       btn.textContent = 'Sync Now';
 
+      const deployBtn = document.createElement('button');
+      deployBtn.type = 'button';
+      deployBtn.className = 'sync-item-deploy-btn';
+      deployBtn.dataset.sensor = s.name;
+      deployBtn.textContent = 'Update Now';
+
       const result = document.createElement('div');
       result.className = 'sync-item-result';
       result.hidden = true;
 
-      li.append(name, badge, ip, uptime, version, spacer, btn, result);
+      li.append(name, badge, ip, uptime, version, spacer, btn, deployBtn, result);
       list.appendChild(li);
     });
   }
@@ -1392,6 +1404,36 @@
       const payload = await postJson(SYNC_TRIGGER_URL, { sensor: sensorName });
       result.textContent = (payload.ok ? payload.output : (payload.error || payload.output)) || 'Done, no output.';
       result.classList.add(payload.ok ? 'ok' : 'error');
+    } catch (err) {
+      result.textContent = err.message;
+      result.classList.add('error');
+    } finally {
+      result.hidden = false;
+      btn.disabled = false;
+      btn.textContent = prevLabel;
+    }
+  });
+
+  el('sync-list').addEventListener('click', async (e) => {
+    const btn = e.target.closest('.sync-item-deploy-btn');
+    if (!btn || btn.disabled) return;
+    const sensorName = btn.dataset.sensor;
+    const result = btn.closest('.sync-item').querySelector('.sync-item-result');
+
+    btn.disabled = true;
+    const prevLabel = btn.textContent;
+    btn.textContent = 'Updating…';
+    result.hidden = true;
+    result.className = 'sync-item-result';
+
+    try {
+      const payload = await postJson(DEPLOY_TRIGGER_URL, { sensor: sensorName });
+      result.textContent = (payload.ok ? payload.output : (payload.error || payload.output)) || 'Done, no output.';
+      result.classList.add(payload.ok ? 'ok' : 'error');
+      // Not forcing a reload here (unlike, say, saveSensorLabel) — the
+      // updated commit_hash/commit_summary/commit_date show up on the next
+      // regular loadReadings() poll (REFRESH_MS), same as Sync Now above
+      // leaves the uptime/reading refresh to that same poll.
     } catch (err) {
       result.textContent = err.message;
       result.classList.add('error');

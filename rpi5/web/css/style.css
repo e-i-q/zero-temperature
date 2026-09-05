@@ -442,7 +442,8 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
 
 .sync-item-spacer { flex: 1; }
 
-.sync-item-btn {
+.sync-item-btn,
+.sync-item-deploy-btn {
   font-family: var(--font-heading);
   font-weight: 600;
   font-size: 11px;
@@ -455,8 +456,10 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
   cursor: pointer;
   flex: none;
 }
-.sync-item-btn:hover:not(:disabled) { background: var(--color-surface); }
-.sync-item-btn:disabled { opacity: 0.5; cursor: default; }
+.sync-item-btn:hover:not(:disabled),
+.sync-item-deploy-btn:hover:not(:disabled) { background: var(--color-surface); }
+.sync-item-btn:disabled,
+.sync-item-deploy-btn:disabled { opacity: 0.5; cursor: default; }
 
 .sync-item-result {
   flex-basis: 100%;

@@ -209,9 +209,13 @@
                 running (hash · commit summary · date, reported right after
                 its last push-to-deploy). "Sync Now" is only useful for a Pi
                 Zero that's been offline — it asks that Pi to push any local
-                readings not yet in this database. See
-                rpi-zero/python/uptime_reporter.py,
-                rpi-zero/python/report_version.py and rpi-zero/web/sync.php.
+                readings not yet in this database. "Update Now" pulls +
+                redeploys that one Pi Zero on demand, for one that missed the
+                automatic redeploy a push normally triggers fleet-wide (e.g.
+                it was offline at the time), without waiting for the next
+                push. See rpi-zero/python/uptime_reporter.py,
+                rpi-zero/python/report_version.py, rpi-zero/web/sync.php and
+                rpi-zero/web/deploy_trigger.php.
               </p>
               <ul class="sync-list" id="sync-list"></ul>
             </div>

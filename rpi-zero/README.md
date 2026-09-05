@@ -213,6 +213,12 @@ sudo DEPLOY_TOKEN=<token printed on the Hive> bash setup/setup_deploy_trigger.sh
 push still redeploys the Hive; this Pi Zero just doesn't get the relay and
 needs deploying by hand, same as before.
 
+This same setup also backs the Hive dashboard's Settings tab "Update Now"
+button for this sensor (`../rpi5/web/api/deploy_trigger.php`) — a way to
+redeploy this one Pi Zero on demand, e.g. right after it comes back online
+having missed the last push's fleet-wide relay, without waiting for the
+next push.
+
 ## Why SQLite on a RAM disk?
 
 The Pi Zero's SD card wears out under frequent writes. The live database
