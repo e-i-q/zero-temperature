@@ -51,10 +51,14 @@ def register_sensor(conn, hostname: str, ip_address: str | None = None) -> None:
     conn.commit()
 
 
-def update_status(conn, hostname: str, status: str) -> None:
+def update_status(conn, hostname: str, status: str, voltage_v: float, current_ma: float, power_w: float) -> None:
     """Set this Pi's `status` in the remote `sensors` table — the live
     OK/CHARGING <pct>%/BATTERY <pct>% label ups_ina219.py computes from the
     UPS HAT, shown per sensor tile on the Hive dashboard's Overview tab.
+    Also sets `battery_voltage_v`/`battery_current_ma`/`battery_power_w` —
+    the raw INA219 readings `status` was derived from — shown per sensor on
+    the Hive dashboard's Settings tab, Sensors section (unlike `status`,
+    these three aren't shown on the Overview tab's tiles).
     Same upsert shape as register_sensor() above: if this Pi doesn't have a
     `sensors` row yet (dht22_logger.py hasn't run here, or this is its very
     first write), the INSERT branch creates a placeholder one rather than
@@ -62,11 +66,15 @@ def update_status(conn, hostname: str, status: str) -> None:
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO sensors (name, description, status)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (name) DO UPDATE SET status = EXCLUDED.status
+            INSERT INTO sensors (name, description, status, battery_voltage_v, battery_current_ma, battery_power_w)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (name) DO UPDATE SET
+                status = EXCLUDED.status,
+                battery_voltage_v = EXCLUDED.battery_voltage_v,
+                battery_current_ma = EXCLUDED.battery_current_ma,
+                battery_power_w = EXCLUDED.battery_power_w
             """,
-            (hostname, f"Auto-registered by ups_ina219.py on {hostname}", status),
+            (hostname, f"Auto-registered by ups_ina219.py on {hostname}", status, voltage_v, current_ma, power_w),
         )
     conn.commit()
 

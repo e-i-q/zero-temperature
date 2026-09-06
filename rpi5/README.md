@@ -217,6 +217,13 @@ waiting for the next push.
   the Pi Zero side (`report_version.py`, run once per push-to-deploy, not on
   a timer). A sensor that's never run the reporter shows "no version on
   file".
+- **Battery readings**: the same Sensors section also shows a "Battery"
+  field (e.g. "12.34 V · -123.4 mA · 1.52 W") with the raw INA219 readings
+  behind the Overview tab's power badge — driven by the
+  `sensors.battery_voltage_v`/`battery_current_ma`/`battery_power_w`
+  columns, from the same `ups_ina219.py` run as `sensors.status` (see
+  "UPS battery status" above). A sensor with no UPS HAT just omits this
+  field entirely, same as the power badge.
 - **Forecast tab**: `forecast.php` reuses the Overview tab's range-chip UI
   (12H/24H/2D/5D/1M/ALL) so both tabs feel the same, but it's inherently a
   forward-looking window — Open-Meteo's free `/v1/forecast` endpoint only

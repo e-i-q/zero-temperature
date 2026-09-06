@@ -15,12 +15,14 @@ Requires:
 Remote DB:
     Uses the same shared connection/config as dht22_logger.py — see
     remote_db.py for connection config and auth. Unlike dht22_logger.py this
-    writes only `sensors.status`, never `readings` — there's no history to
-    keep here, just a live status label — so there's no local SQLite mirror
-    and no offline backlog to replay. The write is best-effort: if the
-    remote host is unreachable, a warning goes to stderr and the script
-    exits non-zero, but there's nothing else to do locally — the next cron
-    run (5 minutes later, see setup/setup_ups_ina219.sh) just tries again.
+    writes only `sensors.status` and the raw voltage/current/power behind
+    it, never `readings` — there's no history to keep here, just a live
+    status label and the numbers it was derived from — so there's no local
+    SQLite mirror and no offline backlog to replay. The write is
+    best-effort: if the remote host is unreachable, a warning goes to
+    stderr and the script exits non-zero, but there's nothing else to do
+    locally — the next cron run (5 minutes later, see
+    setup/setup_ups_ina219.sh) just tries again.
 
 Status:
     The HAT reports `Current` negative while the Pi is running off the
@@ -277,6 +279,7 @@ def main() -> int:
 
     bus_voltage = ina219.getBusVoltage_V()  # voltage on V- (load side)
     current_ma = ina219.getCurrent_mA()
+    power_w = ina219.getPower_W()
     percent = battery_percent(bus_voltage)
     status = compute_status(current_ma, percent)
 
@@ -288,7 +291,7 @@ def main() -> int:
         return 1
 
     try:
-        remote_db.update_status(conn, hostname, status)
+        remote_db.update_status(conn, hostname, status, bus_voltage, current_ma, power_w)
     except psycopg2.Error as e:
         conn.rollback()
         print(f"WARNING: remote DB write failed: {e}", file=sys.stderr)

@@ -119,11 +119,18 @@ in the Hive dashboard's Overview tab (`../rpi5`):
 - **CHARGING &lt;pct&gt;%** — on mains, battery topping up
 - **BATTERY &lt;pct&gt;%** — mains lost, running on battery
 
+The same run also reports the raw INA219 readings that badge is derived
+from — bus voltage, current and power — into `sensors.battery_voltage_v` /
+`battery_current_ma` / `battery_power_w`, shown per sensor on the Hive
+dashboard's Settings tab, Sensors section (unlike the badge above, these
+aren't shown on the Overview tab's tiles).
+
 This is entirely optional and independent of `dht22_logger.py` — a Zero
-without a UPS HAT just never writes `status`, and the dashboard shows OK for
-it whenever it's otherwise online. It needs the same central-DB `status`
-column set up first (see `../../db/database/sensors/tables/sensors.md`), and
-the same `~/.pgpass` entry as `dht22_logger.py` for the `sensor_writer` role.
+without a UPS HAT just never writes any of the four columns above, and the
+dashboard shows OK (and no battery readings) for it whenever it's otherwise
+online. It needs the same central-DB columns set up first (see
+`../../db/database/sensors/tables/sensors.md`), and the same `~/.pgpass`
+entry as `dht22_logger.py` for the `sensor_writer` role.
 
 ```bash
 sudo bash setup/setup_ups_ina219.sh     # installs deps, enables I2C, cron job

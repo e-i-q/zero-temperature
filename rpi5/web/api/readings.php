@@ -69,7 +69,7 @@ $pdo = db();
 // readings in this window, so the dashboard can still render an offline
 // tile for them instead of silently dropping them. --------------------------
 try {
-    $sensors = $pdo->query('SELECT id, name, description, ip_address, status, uptime_seconds, commit_hash, commit_summary, commit_date, last_ping_at, dht22_fault_at FROM sensors ORDER BY name')->fetchAll();
+    $sensors = $pdo->query('SELECT id, name, description, ip_address, status, battery_voltage_v, battery_current_ma, battery_power_w, uptime_seconds, commit_hash, commit_summary, commit_date, last_ping_at, dht22_fault_at FROM sensors ORDER BY name')->fetchAll();
 } catch (PDOException $e) {
     fail(500, 'Could not read sensor registry: ' . $e->getMessage());
 }
@@ -147,6 +147,15 @@ foreach ($sensors as $s) {
         // sensor with no UPS HAT (or one that's never run that script).
         // script.js treats null the same as "OK" while the sensor is online.
         'status'      => $s['status'],
+        // Raw INA219 readings behind `status` above, from the same
+        // ups_ina219.py run via remote_db.update_status() — see
+        // ../../../../db/database/sensors/tables/sensors.md. Null together
+        // (same conditions as `status` being null) for a sensor with no UPS
+        // HAT. Shown on the Settings tab's Sensors section (script.js),
+        // not per-tile — unlike `status`, these aren't an at-a-glance badge.
+        'battery_voltage_v'  => $s['battery_voltage_v'] !== null ? round((float) $s['battery_voltage_v'], 2) : null,
+        'battery_current_ma' => $s['battery_current_ma'] !== null ? round((float) $s['battery_current_ma'], 1) : null,
+        'battery_power_w'    => $s['battery_power_w'] !== null ? round((float) $s['battery_power_w'], 2) : null,
         // Seconds since this sensor's Pi last booted, from
         // uptime_reporter.py's remote_db.update_uptime() — see
         // ../../../../db/database/sensors/tables/sensors.md. Null if that

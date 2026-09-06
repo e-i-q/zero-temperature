@@ -40,7 +40,7 @@
   ];
 
   let currentRange = localStorage.getItem(RANGE_STORAGE_KEY) || '24h';
-  let sensors = [];        // [{id, name, description, online, last_ping_at, dht22_fault, dht22_fault_since, latest, stats, status, uptime_seconds, commit_hash, commit_summary, commit_date}]
+  let sensors = [];        // [{id, name, description, online, last_ping_at, dht22_fault, dht22_fault_since, latest, stats, status, battery_voltage_v, battery_current_ma, battery_power_w, uptime_seconds, commit_hash, commit_summary, commit_date}]
   let series = {};         // { sensorId: [{recorded_at, temperature_c, humidity_pct, sample_count, attempt_count, max_attempts}] }
   let dailySeries = {};    // { sensorId: [{day, temp_avg, temp_min, temp_max}] }
   let hidden = new Set();  // sensor ids toggled off via the legend
@@ -1650,6 +1650,22 @@
     return [s.commit_hash, s.commit_summary, date].filter(Boolean).join(' · ');
   }
 
+  // Renders the raw INA219 readings behind `status` (sensors.battery_voltage_v/
+  // battery_current_ma/battery_power_w, from ups_ina219.py — see
+  // db/database/sensors/tables/sensors.md) as a compact "12.34 V · -123.4 mA
+  // · 1.52 W" string — the numbers behind the OK/CHARGING/BATTERY badge shown
+  // on the Overview tab's tiles. All three land together or not at all (same
+  // UPS-HAT-fitted condition as `status`), so this only checks
+  // battery_voltage_v. Returns null (rather than a placeholder string) for a
+  // sensor with no UPS HAT, so the caller can skip the field entirely.
+  function formatBattery(s) {
+    if (s.battery_voltage_v === null || s.battery_voltage_v === undefined) return null;
+    const parts = [`${s.battery_voltage_v.toFixed(2)} V`];
+    if (s.battery_current_ma !== null) parts.push(`${s.battery_current_ma.toFixed(1)} mA`);
+    if (s.battery_power_w !== null) parts.push(`${s.battery_power_w.toFixed(2)} W`);
+    return parts.join(' · ');
+  }
+
   // -- Manual sync + deploy triggers ("Sync Now" / "Update Now") --------------
   // "Sync Now" is only meaningful for a Pi Zero that's fallen behind (e.g.
   // taken offline on battery) — see api/sync_trigger.php and
@@ -1711,6 +1727,9 @@
         makeSyncField('Uptime', formatUptime(s.uptime_seconds)),
         makeSyncField('Git version', version),
       );
+
+      const battery = formatBattery(s);
+      if (battery) info.append(makeSyncField('Battery', battery));
 
       const actions = document.createElement('div');
       actions.className = 'sync-item-actions';
