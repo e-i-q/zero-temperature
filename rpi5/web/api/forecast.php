@@ -24,13 +24,12 @@
  *                so anything past that (including "all") is clamped to that
  *                ceiling rather than its literal meaning.
  *   ?lat=49.19   Forecast location, WGS84 decimal degrees. Both or neither —
- *   ?lon=16.61   defaults to DEFAULT_LATITUDE/DEFAULT_LONGITUDE (Brno,
- *                the dashboard's original hardcoded location) when omitted,
+ *   ?lon=16.61   defaults to DEFAULT_LATITUDE/DEFAULT_LONGITUDE (Brno, the
+ *                dashboard's original hardcoded location) when omitted,
  *                which is what a logged-out visitor (or a profile with no
- *                active forecast_places row — see settings.php's
- *                `active_place_id`) gets. The Forecast tab passes its
- *                logged-in profile's active place's coordinates here once
- *                one is set.
+ *                saved forecast_places rows — see settings.php) gets. The
+ *                Forecast tab calls this once per saved place, passing
+ *                each one's own coordinates, and draws one chart per call.
  */
 
 declare(strict_types=1);

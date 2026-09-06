@@ -570,7 +570,6 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
   padding: 7px 8px 7px 10px;
   flex-wrap: wrap;
 }
-.places-item.active { border-color: var(--color-accent); }
 
 .places-item-name {
   font-family: var(--font-mono);
@@ -581,15 +580,6 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
 .places-item-coords {
   font: 400 10px var(--font-mono);
   color: var(--color-text-muted);
-  flex: none;
-}
-
-.places-item-badge {
-  font: 400 9px var(--font-mono);
-  letter-spacing: 0.04em;
-  padding: 1px 5px;
-  border: 1px solid var(--color-accent);
-  color: var(--color-accent);
   flex: none;
 }
 
@@ -768,6 +758,26 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
 
 .chart-wrap { margin-top: 10px; position: relative; }
 .chart-wrap svg { width: 100%; height: auto; display: block; cursor: crosshair; }
+
+/* Wraps one .chart-card per forecast place — see buildForecastCard() in
+   script.js. Just a plain block; .chart-card's own margin-bottom already
+   stacks the cards. */
+.forecast-cards { display: block; }
+
+/* Small per-card meta line (forecast hour count + cache freshness) — like
+   <footer>, but scoped inside a card instead of the whole tab, since every
+   place has its own count/timestamp. */
+.chart-foot {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-divider);
+  font: 400 10px var(--font-mono);
+  color: var(--color-text-muted);
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+}
 
 svg text { font-family: var(--font-mono); fill: var(--color-text-muted); }
 

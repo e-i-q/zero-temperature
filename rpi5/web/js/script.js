@@ -49,21 +49,30 @@
   let chartGeom = {};      // svgId -> x/y mapping of its last render, for the linked crosshair
 
   let forecastRange = localStorage.getItem(FORECAST_RANGE_STORAGE_KEY) || '24h';
-  let forecastReadings = []; // Open-Meteo hourly forecast rows, api/forecast.php's shape
+  // One api/forecast.php payload (or null on a failed fetch) per forecast
+  // target, keyed by forecastTargets()'s `key` — 'default' for the
+  // hardcoded Brno location, or a place's id (as a string) otherwise. See
+  // loadForecast()/renderForecastCards().
+  let forecastData = {};
   let forecastLoaded = false; // loaded lazily, the first time the Forecast tab is opened
 
   // This profile's saved forecast locations (Settings tab's Forecast
-  // section) and which one (if any) is active — settings.php's `places`/
-  // `active_place_id`, see its docstring and
-  // ../../../../db/database/sensors/tables/forecast_places.md. Both stay
-  // empty/null for a logged-out visitor, same convention as sensorLabels:
-  // no profile means no saved places, and the Forecast tab plots
-  // api/forecast.php's own hardcoded default location (Brno) instead.
+  // section) — settings.php's `places`, see its docstring and
+  // ../../../../db/database/sensors/tables/forecast_places.md. Empty for a
+  // logged-out visitor, same convention as sensorLabels: no profile means
+  // no saved places, and the Forecast tab plots api/forecast.php's own
+  // hardcoded default location (Brno) instead — see forecastTargets().
   let forecastPlaces = []; // [{id, name, latitude, longitude}]
-  let activePlaceId = null;
 
-  function activePlace() {
-    return forecastPlaces.find((p) => p.id === activePlaceId) || null;
+  // What the Forecast tab actually renders: one card per saved place, or a
+  // single "Brno" default when none are saved. `key` is stable and unique
+  // per target — used to line up forecastData entries and to detect
+  // whether ensureForecastCards() needs to rebuild the card list at all.
+  function forecastTargets() {
+    if (forecastPlaces.length) {
+      return forecastPlaces.map((p) => ({ key: String(p.id), name: p.name, latitude: p.latitude, longitude: p.longitude }));
+    }
+    return [{ key: 'default', name: 'Brno', latitude: null, longitude: null }];
   }
 
   // -- Settings (password-profile-backed range persistence) -------------------
@@ -106,7 +115,7 @@
       drawChart('chart-hum', 'humidity_pct', '%', 220);
       drawLongChart();
     }
-    if (forecastLoaded) drawForecastChart();
+    if (forecastLoaded) renderForecastCards();
   }
 
   el('theme-toggle').addEventListener('click', () => {
@@ -252,35 +261,109 @@
     }
   }
 
-  // Reflects the currently active place (or the default, "Brno") into the
-  // Forecast tab's chart title — kept in sync with forecastPlaces/
-  // activePlaceId by every caller that can change either (applyRangesFromSettings,
-  // logout).
-  function updateForecastTitle() {
-    const place = activePlace();
-    el('forecast-title').textContent = `Temperature forecast — ${place ? place.name : 'Brno'} (Open-Meteo)`;
+  // Builds one empty .chart-card for a forecast target — same markup as the
+  // Overview tab's chart cards (corners, chart-head, chart-wrap>svg), plus
+  // a small per-card chart-foot for its own hour count/cache freshness.
+  // Built via createElement/textContent throughout (never innerHTML with
+  // interpolated text) since a place's `name` came from api/geocode.php,
+  // i.e. text this dashboard didn't author.
+  function buildForecastCard(target) {
+    const section = document.createElement('section');
+    section.className = 'chart-card';
+    for (const pos of ['tl', 'tr', 'bl', 'br']) {
+      const corner = document.createElement('i');
+      corner.className = 'corner ' + pos;
+      section.appendChild(corner);
+    }
+
+    const head = document.createElement('div');
+    head.className = 'chart-head';
+    const title = document.createElement('span');
+    title.className = 'chart-title';
+    title.textContent = `Temperature forecast — ${target.name} (Open-Meteo)`;
+    const note = document.createElement('span');
+    note.className = 'chart-note';
+    head.append(title, note);
+
+    const wrap = document.createElement('div');
+    wrap.className = 'chart-wrap';
+    const svg = makeEl('svg', { viewBox: '0 0 1000 240', preserveAspectRatio: 'none' });
+    wrap.appendChild(svg);
+
+    const foot = document.createElement('div');
+    foot.className = 'chart-foot';
+    const count = document.createElement('span');
+    count.className = 'forecast-card-count';
+    count.textContent = '—';
+    const generated = document.createElement('span');
+    generated.className = 'forecast-card-generated';
+    foot.append(count, generated);
+
+    section.append(head, wrap, foot);
+    return section;
   }
 
+  // Rebuilds #forecast-cards' children to match `targets`, but only when
+  // the actual set/order of targets changed (tracked via a joined-keys
+  // marker) — a plain data refresh (the 5-minute poll, a range-chip click)
+  // reuses the existing cards/SVGs instead of tearing them down, so nothing
+  // flickers or loses scroll position for an unrelated update.
+  function ensureForecastCards(targets) {
+    const container = el('forecast-cards');
+    const wantKeys = targets.map((t) => t.key).join('|');
+    if (container.dataset.keys === wantKeys) return;
+    container.innerHTML = '';
+    targets.forEach((t) => container.appendChild(buildForecastCard(t)));
+    container.dataset.keys = wantKeys;
+  }
+
+  // Draws every card from forecastTargets()/forecastData's current state —
+  // called both after a fetch (loadForecast()) and on a theme toggle
+  // (redrawThemedCharts()), which only needs to recolor already-fetched
+  // data, not refetch it. Relies on ensureForecastCards() having already
+  // put the cards in the same order as forecastTargets() returns.
+  function renderForecastCards() {
+    const targets = forecastTargets();
+    const cards = [...el('forecast-cards').children];
+    targets.forEach((t, i) => {
+      const card = cards[i];
+      if (!card) return; // ensureForecastCards() hasn't run yet for this target set
+      const payload = forecastData[t.key];
+      drawForecastChart(card.querySelector('svg'), (payload && payload.readings) || []);
+      card.querySelector('.chart-note').textContent = !payload
+        ? "couldn't reach Open-Meteo and there's no cached forecast either"
+        : payload.clamped
+          ? `shaded bands = approx. night (20:00–06:00) · bars = hourly rain/snow · Open-Meteo only forecasts ${payload.forecast_days_max} days ahead — showing the max available`
+          : 'shaded bands = approx. night (20:00–06:00) · bars = hourly rain/snow';
+      card.querySelector('.forecast-card-count').textContent =
+        payload ? payload.count + ' forecast hour' + (payload.count === 1 ? '' : 's') : '—';
+      card.querySelector('.forecast-card-generated').textContent = payload ? 'Queried ' + fmtTime(payload.generated_at) : '';
+    });
+  }
+
+  // Fetches every current target's forecast in parallel (one api/forecast.php
+  // call per place, each cached server-side under its own coordinates — see
+  // that file's docstring) and draws them all. A target that fails to load
+  // gets forecastData[key] = null rather than dropping its card, so it still
+  // renders — just with the "couldn't reach Open-Meteo" message in place of
+  // a chart, same as the single-location design used to show.
   async function loadForecast() {
-    try {
-      const place = activePlace();
-      let url = `${FORECAST_URL}?range=${encodeURIComponent(forecastRange)}`;
-      if (place) {
-        url += `&lat=${encodeURIComponent(place.latitude)}&lon=${encodeURIComponent(place.longitude)}`;
+    const targets = forecastTargets();
+    ensureForecastCards(targets);
+    renderForecastCards(); // paint whatever's already cached before the fetches below land, so a card never flashes blank
+    await Promise.all(targets.map(async (t) => {
+      try {
+        let url = `${FORECAST_URL}?range=${encodeURIComponent(forecastRange)}`;
+        if (t.latitude !== null) {
+          url += `&lat=${encodeURIComponent(t.latitude)}&lon=${encodeURIComponent(t.longitude)}`;
+        }
+        forecastData[t.key] = await fetchJson(url);
+      } catch (err) {
+        console.error(`Failed to load forecast for ${t.name}:`, err.message);
+        forecastData[t.key] = null;
       }
-      const payload = await fetchJson(url);
-      forecastReadings = payload.readings || [];
-      el('forecast-empty-state').hidden = forecastReadings.length > 0;
-      el('section-forecast').style.display = forecastReadings.length ? 'block' : 'none';
-      drawForecastChart();
-      el('forecast-note').textContent = payload.clamped
-        ? `shaded bands = approx. night (20:00–06:00) · bars = hourly rain/snow · Open-Meteo only forecasts ${payload.forecast_days_max} days ahead — showing the max available`
-        : 'shaded bands = approx. night (20:00–06:00) · bars = hourly rain/snow';
-      el('forecast-footer-count').textContent = payload.count + ' forecast hour' + (payload.count === 1 ? '' : 's');
-      el('forecast-footer-generated').textContent = 'Queried ' + fmtTime(payload.generated_at);
-    } catch (err) {
-      console.error('Failed to load forecast:', err.message);
-    }
+    }));
+    renderForecastCards();
   }
 
   function renderStatus() {
@@ -784,10 +867,11 @@
     return h >= 20 || h < 6;
   }
 
-  function drawForecastChart() {
-    const svg = el('chart-forecast');
+  // svg/data are passed in (rather than read from a fixed #chart-forecast
+  // id/forecastReadings global) since the Forecast tab now draws one of
+  // these per saved place — see buildForecastCard()/renderForecastCards().
+  function drawForecastChart(svg, data) {
     svg.innerHTML = '';
-    const data = forecastReadings;
     const W = 1000, H = 240;
     // Extra top margin makes room for the condition-icon strip.
     const marginLeft = 46, marginRight = 46, marginTop = 40, marginBottom = 28;
@@ -1089,15 +1173,13 @@
     }
 
     // Places are private too — drop them and fall back to the Forecast
-    // tab's default location (Brno), reloading it if a custom place had
-    // actually been active.
-    const hadActivePlace = activePlaceId !== null;
+    // tab's single default card (Brno), reloading it if this profile had
+    // actually had places saved.
+    const hadPlaces = forecastPlaces.length > 0;
     forecastPlaces = [];
-    activePlaceId = null;
     el('places-list').innerHTML = '';
     el('places-results').hidden = true;
     el('places-results').innerHTML = '';
-    updateForecastTitle();
 
     // Revert to the fixed default chip set. If either tab's active
     // selection was a custom token that only existed in the profile just
@@ -1120,7 +1202,7 @@
     if (changed) {
       loadReadings();
       if (forecastLoaded) loadForecast();
-    } else if (hadActivePlace && forecastLoaded) {
+    } else if (hadPlaces && forecastLoaded) {
       loadForecast();
     }
   }
@@ -1151,9 +1233,7 @@
     sensorLabels = settings.labels || {};
     // ...and its saved forecast places — see forecastPlaces above.
     forecastPlaces = Array.isArray(settings.places) ? settings.places : [];
-    activePlaceId = settings.active_place_id ?? null;
     renderPlacesList();
-    updateForecastTitle();
   }
 
   // Fire-and-forget save, called from the range-chip handlers below when
@@ -1405,62 +1485,44 @@
   // -- Forecast places (Settings tab, Forecast section) ------------------------
   // Only shown logged in, same as the ranges editor and sensor labels above
   // — a place saved here is private to this profile (settings.php's
-  // `forecast_places`/`active_place_id`), unlike the shared `sensors`
-  // registry the Sensors section below lists. See forecastPlaces/
-  // activePlaceId above and applyRangesFromSettings(), which is what
-  // actually keeps them in sync with the server after every mutation here.
-  // A permanent "Brno (default)" row always leads the list, representing
-  // api/forecast.php's own hardcoded fallback location (activePlaceId ===
-  // null) — so there's always exactly one ACTIVE row to point at, and a
-  // way back to the default without having to remove every saved place.
+  // `forecast_places`), unlike the shared `sensors` registry the Sensors
+  // section below lists. See forecastPlaces/forecastTargets() above and
+  // applyRangesFromSettings(), which is what actually keeps this list in
+  // sync with the server after every mutation here. The Forecast tab plots
+  // every row shown here (or a single default "Brno" card when there are
+  // none) — there's no "active" place to pick, just what to add/remove.
   function renderPlacesList() {
     const list = el('places-list');
     if (!list) return;
     list.innerHTML = '';
-    const rows = [{ id: null, name: 'Brno (default)', latitude: null, longitude: null }, ...forecastPlaces];
-    rows.forEach((p) => {
-      const isActive = p.id === activePlaceId;
+    if (!forecastPlaces.length) {
       const li = document.createElement('li');
-      li.className = 'places-item' + (isActive ? ' active' : '');
+      li.className = 'settings-status';
+      li.style.margin = '0';
+      li.textContent = 'No places saved yet — the Forecast tab shows Brno by default.';
+      list.appendChild(li);
+      return;
+    }
+    forecastPlaces.forEach((p) => {
+      const li = document.createElement('li');
+      li.className = 'places-item';
 
       const name = document.createElement('span');
       name.className = 'places-item-name';
       name.textContent = p.name;
-      li.appendChild(name);
 
-      if (p.latitude !== null) {
-        const coords = document.createElement('span');
-        coords.className = 'places-item-coords';
-        coords.textContent = `${p.latitude.toFixed(2)}, ${p.longitude.toFixed(2)}`;
-        li.appendChild(coords);
-      }
+      const coords = document.createElement('span');
+      coords.className = 'places-item-coords';
+      coords.textContent = `${p.latitude.toFixed(2)}, ${p.longitude.toFixed(2)}`;
 
-      if (isActive) {
-        const badge = document.createElement('span');
-        badge.className = 'places-item-badge';
-        badge.textContent = 'ACTIVE';
-        li.appendChild(badge);
-      } else {
-        const use = document.createElement('button');
-        use.type = 'button';
-        use.className = 'places-item-btn';
-        use.dataset.action = 'activate';
-        use.dataset.id = p.id === null ? '' : String(p.id);
-        use.textContent = 'Use';
-        li.appendChild(use);
-      }
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'places-item-btn remove';
+      remove.dataset.id = String(p.id);
+      remove.title = 'Remove';
+      remove.textContent = '✕';
 
-      if (p.id !== null) {
-        const remove = document.createElement('button');
-        remove.type = 'button';
-        remove.className = 'places-item-btn remove';
-        remove.dataset.action = 'remove';
-        remove.dataset.id = String(p.id);
-        remove.title = 'Remove';
-        remove.textContent = '✕';
-        li.appendChild(remove);
-      }
-
+      li.append(name, coords, remove);
       list.appendChild(li);
     });
   }
@@ -1471,22 +1533,13 @@
     box.hidden = false;
   }
 
-  // Applies the fresh `settings` a places mutation (add/remove/activate)
-  // handed back, then reloads the Forecast tab if it's ever been opened —
-  // the active place (and so the location being plotted) may well have
-  // just changed.
+  // Applies the fresh `settings` a places mutation (add/remove) handed
+  // back, then reloads the Forecast tab if it's ever been opened — the set
+  // of places (and so which cards are shown) just changed.
   function applyPlacesResult(payload) {
     el('places-error').hidden = true;
     applyRangesFromSettings(payload.settings);
     if (forecastLoaded) loadForecast();
-  }
-
-  async function activatePlace(id) {
-    try {
-      applyPlacesResult(await postSettings('set_active_place', { id }));
-    } catch (err) {
-      placesError(err.message);
-    }
   }
 
   async function removePlace(id) {
@@ -1511,11 +1564,7 @@
   el('places-list').addEventListener('click', (e) => {
     const btn = e.target.closest('.places-item-btn');
     if (!btn || btn.disabled) return;
-    // The default row's "Use" button carries an empty id — Number('') is
-    // 0, not null, so that has to be checked before converting.
-    const id = btn.dataset.id === '' ? null : Number(btn.dataset.id);
-    if (btn.dataset.action === 'activate') activatePlace(id);
-    else if (btn.dataset.action === 'remove') removePlace(id);
+    removePlace(Number(btn.dataset.id));
   });
 
   // Renders api/geocode.php's search results as a pick list — each one an

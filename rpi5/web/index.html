@@ -125,25 +125,13 @@
       </div>
     </div>
 
-    <div class="empty-state" id="forecast-empty-state" hidden>
-      <strong>No forecast yet</strong>
-      Couldn't reach Open-Meteo and there's no cached forecast either. This
-      resolves itself on the next successful fetch.
-    </div>
-
-    <section class="chart-card" id="section-forecast">
-      <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
-      <div class="chart-head">
-        <span class="chart-title" id="forecast-title">Temperature forecast — Brno (Open-Meteo)</span>
-        <span class="chart-note" id="forecast-note">shaded bands = approx. night (20:00–06:00) · bars = hourly rain/snow</span>
-      </div>
-      <div class="chart-wrap"><svg id="chart-forecast" viewBox="0 0 1000 240" preserveAspectRatio="none"></svg></div>
-    </section>
-
-    <footer>
-      <span id="forecast-footer-count">—</span>
-      <span id="forecast-footer-generated">—</span>
-    </footer>
+    <!-- One .chart-card per forecast place (script.js's buildForecastCard()/
+         ensureForecastCards()) — every saved place from the Settings tab's
+         Forecast section, or a single default "Brno" card when none are
+         saved / logged out. Each card carries its own title, SVG and
+         count/generated footer, since every place has its own data and
+         cache freshness — see loadForecast(). -->
+    <div class="forecast-cards" id="forecast-cards"></div>
 
   </div>
 
@@ -193,11 +181,11 @@
             <div class="settings-section" data-section="forecast" hidden>
               <p class="settings-status">Forecast places:</p>
               <p class="settings-current">
-                The Forecast tab plots one saved place at a time — search for
-                one below and add it, then click a saved place to switch the
-                chart to it. Private to this profile, same as sensor labels.
-                With none saved (or the active one removed), the Forecast tab
-                falls back to the dashboard's original location, Brno.
+                The Forecast tab plots every place saved here, each as its
+                own chart — search below and add as many as you'd like.
+                Private to this profile, same as sensor labels. With none
+                saved, the Forecast tab falls back to a single chart for the
+                dashboard's original location, Brno.
               </p>
               <ul class="places-list" id="places-list"></ul>
 
