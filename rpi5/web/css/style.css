@@ -395,35 +395,48 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
 
 .sync-item {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 10px;
   border: 1px solid var(--color-divider-strong);
   background: var(--color-bg);
-  padding: 7px 8px 7px 10px;
-  flex-wrap: wrap;
+  padding: 10px 12px;
+}
+
+.sync-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .sync-item-name {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
 }
 
-.sync-item-ip {
-  font-family: var(--font-mono);
-  font-size: 11px;
+.sync-item-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+
+.sync-item-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sync-item-field-label {
+  font: 400 9px var(--font-heading);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--color-text-muted);
 }
 
-.sync-item-uptime {
+.sync-item-field-value {
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--color-text-muted);
-}
-
-.sync-item-version {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--color-text-muted);
+  color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -440,7 +453,10 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
 }
 .sync-item.offline .sync-item-badge { border-color: var(--color-divider-strong); color: var(--color-text-muted); }
 
-.sync-item-spacer { flex: 1; }
+.sync-item-actions {
+  display: flex;
+  gap: 8px;
+}
 
 .sync-item-btn,
 .sync-item-deploy-btn {
@@ -462,7 +478,6 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
 .sync-item-deploy-btn:disabled { opacity: 0.5; cursor: default; }
 
 .sync-item-result {
-  flex-basis: 100%;
   font: 400 11px var(--font-mono);
   white-space: pre-wrap;
   color: var(--color-text-muted);

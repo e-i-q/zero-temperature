@@ -1343,6 +1343,9 @@
       const li = document.createElement('li');
       li.className = 'sync-item' + (s.online ? '' : ' offline');
 
+      const header = document.createElement('div');
+      header.className = 'sync-item-header';
+
       const name = document.createElement('span');
       name.className = 'sync-item-name';
       name.textContent = s.name;
@@ -1351,21 +1354,24 @@
       badge.className = 'sync-item-badge';
       badge.textContent = s.online ? 'ONLINE' : 'OFFLINE';
 
-      const ip = document.createElement('span');
-      ip.className = 'sync-item-ip';
-      ip.textContent = s.ip_address || 'no IP on file';
+      header.append(name, badge);
 
-      const uptime = document.createElement('span');
-      uptime.className = 'sync-item-uptime';
-      uptime.textContent = formatUptime(s.uptime_seconds);
+      const info = document.createElement('div');
+      info.className = 'sync-item-info';
 
       const version = document.createElement('span');
-      version.className = 'sync-item-version';
+      version.className = 'sync-item-field-value';
       version.textContent = formatVersion(s);
       version.title = s.commit_summary || '';
 
-      const spacer = document.createElement('span');
-      spacer.className = 'sync-item-spacer';
+      info.append(
+        makeSyncField('IP address', s.ip_address || 'no IP on file'),
+        makeSyncField('Uptime', formatUptime(s.uptime_seconds)),
+        makeSyncField('Git version', version),
+      );
+
+      const actions = document.createElement('div');
+      actions.className = 'sync-item-actions';
 
       const btn = document.createElement('button');
       btn.type = 'button';
@@ -1379,13 +1385,38 @@
       deployBtn.dataset.sensor = s.name;
       deployBtn.textContent = 'Update Now';
 
+      actions.append(btn, deployBtn);
+
       const result = document.createElement('div');
       result.className = 'sync-item-result';
       result.hidden = true;
 
-      li.append(name, badge, ip, uptime, version, spacer, btn, deployBtn, result);
+      li.append(header, info, actions, result);
       list.appendChild(li);
     });
+  }
+
+  // Builds one "label: value" field for the Sensors section's info block.
+  // `value` may be a plain string or an already-built element (e.g. the
+  // Git version span, which carries a title tooltip).
+  function makeSyncField(label, value) {
+    const field = document.createElement('div');
+    field.className = 'sync-item-field';
+
+    const labelEl = document.createElement('span');
+    labelEl.className = 'sync-item-field-label';
+    labelEl.textContent = label;
+
+    const valueEl = (typeof value === 'string')
+      ? document.createElement('span')
+      : value;
+    if (typeof value === 'string') {
+      valueEl.textContent = value;
+    }
+    valueEl.classList.add('sync-item-field-value');
+
+    field.append(labelEl, valueEl);
+    return field;
   }
 
   el('sync-list').addEventListener('click', async (e) => {
