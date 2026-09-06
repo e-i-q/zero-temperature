@@ -893,6 +893,39 @@
       svg.appendChild(makeEl('circle', { cx, cy, r: 4, fill: color }));
     }
 
+    // Daily high/low temperature labels - one pair per calendar day covered
+    // by the forecast, printed at that day's peak/trough on the temp line
+    // (the usual weather-app convention). tempMin/tempMax already pad the
+    // axis by 1 degree beyond the data's own extremes, so the labels never
+    // collide with the icon strip above or the time-axis labels below.
+    // Horizontally, though, a day's extreme can land right on the series'
+    // first/last point - i.e. at the plot's left/right edge, straight under
+    // the temperature axis's own per-degree tick labels - so anchor from the
+    // edge inward there instead of centering, which would otherwise smear
+    // the two labels together (see edgeAnchor()).
+    const edgeAnchor = (px) => (px <= marginLeft + 4 ? 'start' : px >= W - marginRight - 4 ? 'end' : 'middle');
+    const dayGroups = new Map();
+    for (let i = 0; i < data.length; i++) {
+      const d = new Date(times[i]);
+      const key = d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate();
+      if (!dayGroups.has(key)) dayGroups.set(key, []);
+      dayGroups.get(key).push(i);
+    }
+    for (const idxs of dayGroups.values()) {
+      let hiI = idxs[0], loI = idxs[0];
+      for (const i of idxs) {
+        if (temps[i] > temps[hiI]) hiI = i;
+        if (temps[i] < temps[loI]) loI = i;
+      }
+      const hiX = x(times[hiI]), loX = x(times[loI]);
+      svg.appendChild(makeEl('text', {
+        x: hiX, y: yTemp(temps[hiI]) - 8, 'text-anchor': edgeAnchor(hiX), 'font-size': 10, 'font-weight': 700, fill: tempColor,
+      })).textContent = Math.round(temps[hiI]) + '°';
+      svg.appendChild(makeEl('text', {
+        x: loX, y: yTemp(temps[loI]) + 15, 'text-anchor': edgeAnchor(loX), 'font-size': 10, 'font-weight': 700, fill: tempColor,
+      })).textContent = Math.round(temps[loI]) + '°';
+    }
+
     // Weather condition icon strip - one icon per tick, spaced independently
     // from the time-axis labels so long ranges (e.g. 1M/ALL) don't smear
     // icons together.
