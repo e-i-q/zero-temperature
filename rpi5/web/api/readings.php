@@ -43,10 +43,12 @@ function rangeModifier(string $range): ?string {
     return '-' . $m[1] . ' ' . $units[$m[2]];
 }
 
-// A sensor with no reading in the last OFFLINE_MINUTES is shown as offline.
-// Zeros default to a 10-minute cron interval (setup_dht22_logger.sh), so 30
-// minutes tolerates a few missed/best-effort remote writes before flagging.
-const OFFLINE_MINUTES = 30;
+// ONLINE/OFFLINE is decided by rpi5/bin/ping_sensors.php's TCP reachability
+// check (cron, every minute — see sensors.last_ping_at), not by reading
+// recency: a sensor with a loose DHT22 keeps answering pings even while it
+// reports nothing, and should show ONLINE + FAULTY DHT22, not a misleading
+// OFFLINE. This tolerates one missed/slow ping tick before flagging.
+const PING_STALE_SECONDS = 90;
 
 // Safety cap on rows returned for the "all" range on a long-running install
 // — the dashboard downsamples nothing server-side, so this bounds payload
@@ -67,13 +69,13 @@ $pdo = db();
 // readings in this window, so the dashboard can still render an offline
 // tile for them instead of silently dropping them. --------------------------
 try {
-    $sensors = $pdo->query('SELECT id, name, description, ip_address, status, uptime_seconds, commit_hash, commit_summary, commit_date FROM sensors ORDER BY name')->fetchAll();
+    $sensors = $pdo->query('SELECT id, name, description, ip_address, status, uptime_seconds, commit_hash, commit_summary, commit_date, last_ping_at, dht22_fault_at FROM sensors ORDER BY name')->fetchAll();
 } catch (PDOException $e) {
     fail(500, 'Could not read sensor registry: ' . $e->getMessage());
 }
 
 // -- Readings -----------------------------------------------------------------
-$sql = 'SELECT sensor_id, recorded_at, temperature_c, humidity_pct, sample_count FROM readings';
+$sql = 'SELECT sensor_id, recorded_at, temperature_c, humidity_pct, sample_count, attempt_count, max_attempts FROM readings';
 if ($range !== 'all') {
     $sql .= ' WHERE recorded_at >= :since';
 }
@@ -112,6 +114,12 @@ foreach ($rows as $row) {
         'temperature_c' => round((float) $row['temperature_c'], 2),
         'humidity_pct'  => round((float) $row['humidity_pct'], 2),
         'sample_count'  => (int) $row['sample_count'],
+        // Total attempts this run made and its configured ceiling — null
+        // together for rows predating this tracking (see readings.md in
+        // the `db` project). script.js's formatSamples() falls back to
+        // plain sample_count when either is null.
+        'attempt_count' => $row['attempt_count'] !== null ? (int) $row['attempt_count'] : null,
+        'max_attempts'  => $row['max_attempts'] !== null ? (int) $row['max_attempts'] : null,
     ];
     $series[$sid][] = $point;
     $latestBySensor[$sid] = $point;
@@ -123,8 +131,8 @@ foreach ($sensors as $s) {
     $sid = (int) $s['id'];
     $pts = $series[$sid];
     $latest = $latestBySensor[$sid] ?? null;
-    $lastSeenTs = $latest ? strtotime($latest['recorded_at']) : false;
-    $online = $lastSeenTs !== false && ($nowTs - $lastSeenTs) <= OFFLINE_MINUTES * 60;
+    $lastPingTs = $s['last_ping_at'] !== null ? strtotime($s['last_ping_at']) : false;
+    $online = $lastPingTs !== false && ($nowTs - $lastPingTs) <= PING_STALE_SECONDS;
 
     $temps = array_column($pts, 'temperature_c');
     $hums  = array_column($pts, 'humidity_pct');
@@ -155,7 +163,18 @@ foreach ($sensors as $s) {
         'commit_hash'    => $s['commit_hash'],
         'commit_summary' => $s['commit_summary'],
         'commit_date'    => $s['commit_date'] !== null ? toIsoTz($s['commit_date']) : null,
-        'online'      => $online,
+        // Ping-derived reachability (rpi5/bin/ping_sensors.php), not reading
+        // recency — see PING_STALE_SECONDS above and sensors.last_ping_at in
+        // ../../../../db/database/sensors/tables/sensors.md. Independent of
+        // `status`/`dht22_fault` below: all three can be true/set at once.
+        'online'         => $online,
+        'last_ping_at'   => $s['last_ping_at'] !== null ? toIsoTz($s['last_ping_at']) : null,
+        // Set by dht22_logger.py's remote_db.update_dht22_fault() the first
+        // time a run gets zero successful DHT22 reads; cleared on the next
+        // run with at least one. Drives the "FAULTY DHT22" badge — see
+        // ../../../../db/database/sensors/tables/sensors.md.
+        'dht22_fault'       => $s['dht22_fault_at'] !== null,
+        'dht22_fault_since' => $s['dht22_fault_at'] !== null ? toIsoTz($s['dht22_fault_at']) : null,
         'latest'      => $latest,
         'stats'       => $temps ? [
             'temp_min' => round(min($temps), 1),

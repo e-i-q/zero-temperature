@@ -39,8 +39,8 @@
   ];
 
   let currentRange = localStorage.getItem(RANGE_STORAGE_KEY) || '24h';
-  let sensors = [];        // [{id, name, description, online, latest, stats, status, uptime_seconds, commit_hash, commit_summary, commit_date}]
-  let series = {};         // { sensorId: [{recorded_at, temperature_c, humidity_pct, sample_count}] }
+  let sensors = [];        // [{id, name, description, online, last_ping_at, dht22_fault, dht22_fault_since, latest, stats, status, uptime_seconds, commit_hash, commit_summary, commit_date}]
+  let series = {};         // { sensorId: [{recorded_at, temperature_c, humidity_pct, sample_count, attempt_count, max_attempts}] }
   let dailySeries = {};    // { sensorId: [{day, temp_avg, temp_min, temp_max}] }
   let hidden = new Set();  // sensor ids toggled off via the legend
   let statusLabel = 'Loading…';
@@ -114,6 +114,15 @@
     const hours = Math.round(mins / 60);
     if (hours < 24) return hours + 'h ago';
     return Math.round(hours / 24) + 'd ago';
+  }
+
+  // success/failed/max — see readings.md's attempt_count/max_attempts in
+  // the `db` project. Rows written before that tracking existed have
+  // neither, so fall back to the plain successful-sample count they
+  // always had.
+  function formatSamples(point) {
+    if (point.attempt_count == null || point.max_attempts == null) return String(point.sample_count);
+    return `${point.sample_count}/${point.attempt_count - point.sample_count}/${point.max_attempts}`;
   }
 
   // A sensor's label — this profile's own entry in sensorLabels, set from
@@ -404,20 +413,39 @@
       const label = document.createElement('span');
       label.className = 'tile-label';
       label.textContent = displayName(s);
-      const badge = document.createElement('span');
-      badge.className = 'tile-badge';
-      if (!s.online) {
-        badge.textContent = 'OFFLINE';
-      } else if (s.status && s.status !== 'OK') {
+      // Independent badges, all shown at once — a sensor can be ONLINE,
+      // BATTERY <pct>% and FAULTY DHT22 simultaneously (a Pi with a loose
+      // DHT22 still answers pings, and a UPS's charge state has nothing to
+      // do with either). See readings.php: `online` (ping-based),
+      // `status` (ups_ina219.py) and `dht22_fault` (dht22_logger.py).
+      const badges = document.createElement('span');
+      badges.className = 'tile-badges';
+
+      const connBadge = document.createElement('span');
+      connBadge.className = 'tile-badge';
+      connBadge.textContent = s.online ? 'ONLINE' : 'OFFLINE';
+      if (s.last_ping_at) connBadge.title = 'Last ping ' + fmtRelative(s.last_ping_at);
+      badges.appendChild(connBadge);
+
+      if (s.status && s.status !== 'OK') {
         // "CHARGING <pct>%" / "BATTERY <pct>%" from ups_ina219.py, via
         // sensors.status — see readings.php. Anything else (no UPS HAT
-        // fitted, or status not yet reported) falls through to plain OK.
-        badge.classList.add(s.status.startsWith('CHARGING') ? 'charging' : 'battery');
-        badge.textContent = s.status;
-      } else {
-        badge.textContent = 'OK';
+        // fitted, or status not yet reported) is omitted entirely.
+        const powerBadge = document.createElement('span');
+        powerBadge.className = 'tile-badge ' + (s.status.startsWith('CHARGING') ? 'charging' : 'battery');
+        powerBadge.textContent = s.status;
+        badges.appendChild(powerBadge);
       }
-      head.append(label, badge);
+
+      if (s.dht22_fault) {
+        const faultBadge = document.createElement('span');
+        faultBadge.className = 'tile-badge fault';
+        faultBadge.textContent = 'FAULTY DHT22';
+        if (s.dht22_fault_since) faultBadge.title = 'Failing to read since ' + fmtRelative(s.dht22_fault_since);
+        badges.appendChild(faultBadge);
+      }
+
+      head.append(label, badges);
       tile.appendChild(head);
 
       // Device name, watermarked into the background — only when a label is
@@ -516,7 +544,7 @@
       const tdHum = document.createElement('td');
       tdHum.textContent = point.humidity_pct.toFixed(1);
       const tdSamples = document.createElement('td');
-      tdSamples.textContent = point.sample_count;
+      tdSamples.textContent = formatSamples(point);
       tr.append(tdTime, tdSensor, tdTemp, tdHum, tdSamples);
       body.appendChild(tr);
     }
@@ -1350,11 +1378,24 @@
       name.className = 'sync-item-name';
       name.textContent = s.name;
 
-      const badge = document.createElement('span');
-      badge.className = 'sync-item-badge';
-      badge.textContent = s.online ? 'ONLINE' : 'OFFLINE';
+      const badges = document.createElement('span');
+      badges.className = 'sync-item-badges';
 
-      header.append(name, badge);
+      const connBadge = document.createElement('span');
+      connBadge.className = 'sync-item-badge';
+      connBadge.textContent = s.online ? 'ONLINE' : 'OFFLINE';
+      if (s.last_ping_at) connBadge.title = 'Last ping ' + fmtRelative(s.last_ping_at);
+      badges.appendChild(connBadge);
+
+      if (s.dht22_fault) {
+        const faultBadge = document.createElement('span');
+        faultBadge.className = 'sync-item-badge fault';
+        faultBadge.textContent = 'FAULTY DHT22';
+        if (s.dht22_fault_since) faultBadge.title = 'Failing to read since ' + fmtRelative(s.dht22_fault_since);
+        badges.appendChild(faultBadge);
+      }
+
+      header.append(name, badges);
 
       const info = document.createElement('div');
       info.className = 'sync-item-info';

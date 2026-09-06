@@ -113,6 +113,47 @@ def update_version(conn, hostname: str, commit_hash: str, commit_summary: str, c
     conn.commit()
 
 
+def update_dht22_fault(conn, hostname: str, faulty: bool) -> None:
+    """Set/clear this Pi's `dht22_fault_at` in the remote `sensors` table —
+    called by dht22_logger.py on every run, not just failing ones. Drives
+    the "FAULTY DHT22" badge on the Hive dashboard's Overview tab
+    (rpi5/web/js/script.js), shown independently of (and possibly
+    alongside) the ONLINE/OFFLINE and power-status badges.
+
+    faulty=True (a run got zero successful DHT22 reads — see
+    dht22_logger.py's read_samples()) COALESCEs against the column's
+    current value, so it only stamps `now()` the first time; a fault that
+    was already flagged keeps its original "since" timestamp rather than
+    creeping forward on every subsequent failing run. faulty=False (a run
+    got at least one successful read) clears it back to NULL.
+
+    Same upsert shape as update_status() above: if this Pi doesn't have a
+    `sensors` row yet, the INSERT branch creates a placeholder one rather
+    than silently doing nothing."""
+    description = f"Auto-registered by dht22_logger.py on {hostname}"
+    with conn.cursor() as cur:
+        if faulty:
+            cur.execute(
+                """
+                INSERT INTO sensors (name, description, dht22_fault_at)
+                VALUES (%s, %s, now())
+                ON CONFLICT (name) DO UPDATE SET
+                    dht22_fault_at = COALESCE(sensors.dht22_fault_at, EXCLUDED.dht22_fault_at)
+                """,
+                (hostname, description),
+            )
+        else:
+            cur.execute(
+                """
+                INSERT INTO sensors (name, description, dht22_fault_at)
+                VALUES (%s, %s, NULL)
+                ON CONFLICT (name) DO UPDATE SET dht22_fault_at = NULL
+                """,
+                (hostname, description),
+            )
+    conn.commit()
+
+
 def local_hostname() -> str:
     """Equivalent of `uname -n` — used as this RPi's name in the remote `sensors` table."""
     return os.uname().nodename

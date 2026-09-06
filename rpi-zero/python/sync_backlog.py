@@ -37,8 +37,8 @@ import remote_db
 # relevant for local rows recorded before `synced_at` tracking was added,
 # where "not yet confirmed synced" doesn't necessarily mean "never sent".
 INSERT_SQL = """
-    INSERT INTO readings (recorded_at, sensor_id, temperature_c, humidity_pct, sample_count)
-    SELECT %s, s.id, %s, %s, %s
+    INSERT INTO readings (recorded_at, sensor_id, temperature_c, humidity_pct, sample_count, attempt_count, max_attempts)
+    SELECT %s, s.id, %s, %s, %s, %s, %s
     FROM sensors s
     WHERE s.name = %s
       AND NOT EXISTS (
@@ -53,7 +53,7 @@ def pending_rows(db_path: str):
     try:
         local_db.ensure_schema(conn)  # safe to call even when run standalone, before the logger ever has
         return conn.execute(
-            "SELECT id, recorded_at, temperature_c, humidity_pct, sample_count "
+            "SELECT id, recorded_at, temperature_c, humidity_pct, sample_count, attempt_count, max_attempts "
             "FROM readings WHERE synced_at IS NULL ORDER BY recorded_at ASC"
         ).fetchall()
     finally:
@@ -84,7 +84,8 @@ def sync_backlog(db_path: str, hostname: str) -> tuple[int, int]:
         for row in rows:
             params = (
                 row["recorded_at"], row["temperature_c"], row["humidity_pct"],
-                row["sample_count"], hostname, row["recorded_at"],
+                row["sample_count"], row["attempt_count"], row["max_attempts"],
+                hostname, row["recorded_at"],
             )
             try:
                 with pg_conn.cursor() as cur:

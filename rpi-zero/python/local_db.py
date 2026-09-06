@@ -35,6 +35,17 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     if "synced_at" not in existing_cols:
         conn.execute("ALTER TABLE readings ADD COLUMN synced_at TEXT")
 
+    # attempt_count = total DHT22 reads tried this run (successes + failures);
+    # max_attempts = that run's --max_attempts ceiling. Together with the
+    # existing sample_count (successful reads only) these let the dashboard
+    # show success/failed/max instead of a bare sample count — see
+    # dht22_logger.py's read_samples()/main(). Existing databases predate
+    # both columns, added on the fly like synced_at above.
+    if "attempt_count" not in existing_cols:
+        conn.execute("ALTER TABLE readings ADD COLUMN attempt_count INTEGER")
+    if "max_attempts" not in existing_cols:
+        conn.execute("ALTER TABLE readings ADD COLUMN max_attempts INTEGER")
+
     # Single-row table remembering whether the *previous* dht22_logger.py run
     # reached the remote DB. Comparing that against the current run's result
     # is how an offline→online transition gets detected — see

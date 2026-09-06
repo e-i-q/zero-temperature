@@ -44,6 +44,27 @@ Offline backlog sync:
     with no connectivity). Otherwise the backlog sync never runs — not on a
     timer, not on every reading — so there's no added cost while offline or
     once everything is already caught up. See sync_backlog.py.
+
+DHT22 read failures:
+    read_samples() below keeps retrying (up to --max_attempts times) until
+    it has --samples good reads. Every row this script stores — locally
+    and on the remote DB — carries all three counts (successes as
+    `sample_count`, always; total tries and the run's ceiling as
+    `attempt_count`/`max_attempts`) so "Samples" can be shown as
+    success/failed/max instead of a bare count. See readings.md in the
+    `db` project.
+
+    If *none* of the attempts succeed (the sensor came loose, a wiring
+    fault, ...), there's no average to store — no row is written at all,
+    same as before this feature existed. What's new: this now still
+    reaches out to the remote DB, best-effort, just to flag the fault via
+    remote_db.update_dht22_fault() — sensors.dht22_fault_at, cleared again
+    the next time a run gets at least one successful read. That's what
+    drives the Hive dashboard's "FAULTY DHT22" badge, independent of the
+    ONLINE/OFFLINE badge (which the Hive derives by pinging this Pi
+    directly — see ../../rpi5/bin/ping_sensors.php — precisely so a Zero
+    with a loose DHT22 shows ONLINE + FAULTY DHT22 instead of a misleading
+    OFFLINE).
 """
 
 import argparse
@@ -69,8 +90,15 @@ DEFAULT_SENSOR_NAME = "dht22"
 
 
 def read_samples(dht_device, samples, delay, max_attempts):
+    """Returns (temps, hums, attempts) — attempts is how many reads were
+    actually tried (successes + failures), <= max_attempts: it stops early
+    as soon as `samples` good reads are in hand, so a healthy sensor's
+    attempts == len(temps) most runs, while a flaky one climbs toward
+    max_attempts as failures eat into the budget."""
     temps, hums = [], []
+    attempts = 0
     for i in range(1, max_attempts + 1):
+        attempts = i
         try:
             temperature = dht_device.temperature
             humidity = dht_device.humidity
@@ -80,9 +108,9 @@ def read_samples(dht_device, samples, delay, max_attempts):
         except RuntimeError as e:
             print(f"  Error reading {i}/{max_attempts}: {e}")
         if len(temps) >= samples:
-            return temps, hums
+            break
         time.sleep(delay)
-    return temps, hums
+    return temps, hums, attempts
 
 
 def average(values: list[float]) -> float:
@@ -96,16 +124,18 @@ def store_reading(
     temperature_c: float,
     humidity_pct: float,
     sample_count: int,
+    attempt_count: int,
+    max_attempts: int,
 ) -> int:
     conn = sqlite3.connect(db_path)
     try:
         local_db.ensure_schema(conn)
         cur = conn.execute(
             """
-            INSERT INTO readings (recorded_at, sensor, temperature_c, humidity_pct, sample_count)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO readings (recorded_at, sensor, temperature_c, humidity_pct, sample_count, attempt_count, max_attempts)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (timestamp, sensor_name, round(temperature_c, 2), round(humidity_pct, 2), sample_count),
+            (timestamp, sensor_name, round(temperature_c, 2), round(humidity_pct, 2), sample_count, attempt_count, max_attempts),
         )
         conn.commit()
         row_id = cur.lastrowid
@@ -122,6 +152,8 @@ def store_reading_remote(
     temperature_c: float,
     humidity_pct: float,
     sample_count: int,
+    attempt_count: int,
+    max_attempts: int,
 ) -> bool:
     """Mirror a reading to the remote PostgreSQL DB. Best-effort: any failure
     (unreachable host, auth error, ...) is logged as a warning, not raised.
@@ -129,10 +161,13 @@ def store_reading_remote(
     this (via sync_state) to detect an offline→online transition and trigger
     sync_backlog.sync_backlog() for anything missed while disconnected."""
     insert_sql = """
-        INSERT INTO readings (recorded_at, sensor_id, temperature_c, humidity_pct, sample_count)
-        VALUES (%s, (SELECT id FROM sensors WHERE name = %s), %s, %s, %s)
+        INSERT INTO readings (recorded_at, sensor_id, temperature_c, humidity_pct, sample_count, attempt_count, max_attempts)
+        VALUES (%s, (SELECT id FROM sensors WHERE name = %s), %s, %s, %s, %s, %s)
     """
-    params = (timestamp, hostname, round(temperature_c, 2), round(humidity_pct, 2), sample_count)
+    params = (
+        timestamp, hostname, round(temperature_c, 2), round(humidity_pct, 2),
+        sample_count, attempt_count, max_attempts,
+    )
 
     try:
         conn = remote_db.connect()
@@ -149,6 +184,10 @@ def store_reading_remote(
         with conn.cursor() as cur:
             cur.execute(insert_sql, params)
         conn.commit()
+        # A reading only ever gets here with sample_count >= 1 (see main()'s
+        # "all reads failed" branch above) — this run got at least one good
+        # DHT22 read, so any previously-flagged fault has resolved.
+        remote_db.update_dht22_fault(conn, hostname, False)
         print(f"Stored: {timestamp}  {temperature_c:.2f}°C  {humidity_pct:.2f}%  (n={sample_count}) → {remote_db.PG_HOST}/{remote_db.PG_DBNAME}")
         return True
     except psycopg2.Error as e:
@@ -187,27 +226,47 @@ def main() -> int:
     dht_device = adafruit_dht.DHT22(pin)
 
     print(f"Reading DHT22 on GPIO{args.pin} — {args.samples} samples, {args.max_attempts} max attempts, {args.delay}s apart…")
-    temps, hums = read_samples(dht_device, args.samples, args.delay, args.max_attempts)
+    temps, hums, attempts = read_samples(dht_device, args.samples, args.delay, args.max_attempts)
+    success_count = len(temps)
 
     if not temps:
-        print("ERROR: All sensor reads failed. Check wiring and pull-up resistor.", file=sys.stderr)
+        print(f"ERROR: All {attempts} sensor read(s) failed. Check wiring and pull-up resistor.", file=sys.stderr)
+        # Nothing to average, so no reading row — but still flag the fault
+        # on the remote DB, best-effort, so the Hive dashboard can show
+        # FAULTY DHT22 instead of just letting readings go stale. Separate
+        # try/except from store_reading_remote()'s (there's no reading to
+        # mirror here) but the same "never fatal" contract.
+        hostname = remote_db.local_hostname()
+        try:
+            conn = remote_db.connect()
+        except psycopg2.OperationalError as e:
+            print(f"WARNING: could not connect to remote DB at {remote_db.PG_HOST}:{remote_db.PG_PORT}: {e}", file=sys.stderr)
+            return 1
+        try:
+            remote_db.register_sensor(conn, hostname, remote_db.local_ip())
+            remote_db.update_dht22_fault(conn, hostname, True)
+        except psycopg2.Error as e:
+            conn.rollback()
+            print(f"WARNING: remote DB write failed: {e}", file=sys.stderr)
+        finally:
+            conn.close()
         return 1
 
     avg_temp = average(temps)
     avg_hum = average(hums)
-    success_count = len(temps)
+    failed_count = attempts - success_count
 
-    print(f"\nAveraged over {success_count}/{args.samples} successful readings:")
+    print(f"\nAveraged over {success_count}/{args.samples} successful readings ({attempts} attempt(s), {failed_count} failed, max {args.max_attempts}):")
     print(f"  Temperature: {avg_temp:.2f}°C")
     print(f"  Humidity:    {avg_hum:.2f}%")
 
     timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
-    row_id = store_reading(str(db_path), timestamp, args.sensor_name, avg_temp, avg_hum, success_count)
+    row_id = store_reading(str(db_path), timestamp, args.sensor_name, avg_temp, avg_hum, success_count, attempts, args.max_attempts)
 
     hostname = remote_db.local_hostname()
     was_offline = not local_db.get_last_remote_ok(str(db_path))
-    remote_ok = store_reading_remote(hostname, timestamp, avg_temp, avg_hum, success_count)
+    remote_ok = store_reading_remote(hostname, timestamp, avg_temp, avg_hum, success_count, attempts, args.max_attempts)
     local_db.set_last_remote_ok(str(db_path), remote_ok)
 
     if remote_ok:

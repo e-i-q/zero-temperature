@@ -25,7 +25,7 @@ failing. Nothing needs to be done by hand to catch back up: see
 
 | Path | Purpose |
 |---|---|
-| `python/dht22_logger.py` | Reads the DHT22, averages multiple samples, writes a row to SQLite, mirrors it live to the central DB |
+| `python/dht22_logger.py` | Reads the DHT22, averages multiple samples, writes a row to SQLite, mirrors it live to the central DB — see "DHT22 fault reporting" below for what happens when every read fails |
 | `python/ups_ina219.py` | Reads the INA219-based UPS HAT and writes this Pi's live power status to the central DB — see "UPS battery status" below |
 | `python/uptime_reporter.py` | Reads this Pi's own system uptime and writes it to the central DB — see "Uptime reporting" below |
 | `python/report_version.py` | Reads this Pi's currently-deployed git commit and writes it to the central DB — see "Version reporting" below |
@@ -86,6 +86,26 @@ python3 python/dht22_logger.py --samples 5 --delay 2.5 --db /mnt/sqlite_ram/sens
 ```
 
 Requires `adafruit-circuitpython-dht` (`pip3 install adafruit-circuitpython-dht --break-system-packages`).
+
+## DHT22 fault reporting
+
+`dht22_logger.py` retries a failed read (up to `--max_attempts`, default
+50) until it has `--samples` good ones. Every row it stores — locally and
+on the central DB — carries all three counts, so the dashboards' Samples
+column reads success/failed/max (e.g. `4/1/50`) instead of a bare count;
+see `../../db/database/sensors/tables/readings.md`.
+
+If a run exhausts every attempt without a single success (the sensor came
+loose, a wiring fault, ...), there's no average to store, so — same as
+before this feature existed — no row is written at all. What's new: the
+script still reaches out to the central DB, best-effort, just to set
+`sensors.dht22_fault_at`, which drives a FAULTY DHT22 badge on that
+sensor's tile in the Hive dashboard's Overview tab (`../rpi5`). It clears
+itself the moment a later run gets at least one successful read — nothing
+to reset by hand. This badge is independent of ONLINE/OFFLINE, which the
+Hive derives by pinging this Pi directly (see `../rpi5/bin/ping_sensors.php`)
+rather than from reading recency, precisely so a Zero with a loose DHT22
+shows ONLINE + FAULTY DHT22 instead of a misleading OFFLINE.
 
 ## UPS battery status
 

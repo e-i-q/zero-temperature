@@ -443,6 +443,16 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
   max-width: 240px;
 }
 
+/* Wraps 1-2 independent .sync-item-badge chips (connectivity, DHT22
+   fault) — see renderSyncList(). */
+.sync-item-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+  flex: none;
+}
+
 .sync-item-badge {
   font: 400 9px var(--font-mono);
   letter-spacing: 0.04em;
@@ -452,6 +462,7 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
   flex: none;
 }
 .sync-item.offline .sync-item-badge { border-color: var(--color-divider-strong); color: var(--color-text-muted); }
+.sync-item-badge.fault { border-color: var(--series-8); color: var(--series-8); }
 
 .sync-item-actions {
   display: flex;
@@ -598,6 +609,16 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
   pointer-events: none;
 }
 
+/* Wraps 1-3 independent .tile-badge chips (connectivity, power, DHT22
+   fault) — a sensor can show all of them at once, see renderTiles(). */
+.tile-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+  flex: none;
+}
+
 .tile-badge {
   font: 400 9px var(--font-mono);
   letter-spacing: 0.04em;
@@ -609,6 +630,7 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
 .tile.offline .tile-badge { border-color: var(--color-divider-strong); color: var(--color-text-muted); }
 .tile-badge.battery { border-color: var(--status-battery-text); color: var(--status-battery-text); }
 .tile-badge.charging { border-color: var(--status-charging-text); color: var(--status-charging-text); }
+.tile-badge.fault { border-color: var(--series-8); color: var(--series-8); }
 
 .tile-value {
   display: flex;

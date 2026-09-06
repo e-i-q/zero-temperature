@@ -137,7 +137,7 @@ try {
 // -- Query ----------------------------------------------------------------
 try {
     $stmt = $pdo->prepare(
-        "SELECT recorded_at, sensor, temperature_c, humidity_pct, sample_count
+        "SELECT recorded_at, sensor, temperature_c, humidity_pct, sample_count, attempt_count, max_attempts
          FROM readings
          WHERE datetime(recorded_at) >= datetime('now', :window)
          ORDER BY recorded_at ASC
@@ -156,6 +156,11 @@ foreach ($readings as &$row) {
     $row['temperature_c'] = round((float) $row['temperature_c'], 2);
     $row['humidity_pct']  = round((float) $row['humidity_pct'], 2);
     $row['sample_count']  = (int) $row['sample_count'];
+    // Total attempts this run made and its configured ceiling — null
+    // together for rows predating this tracking. script.js's
+    // formatSamples() falls back to plain sample_count when either is null.
+    $row['attempt_count'] = $row['attempt_count'] !== null ? (int) $row['attempt_count'] : null;
+    $row['max_attempts']  = $row['max_attempts'] !== null ? (int) $row['max_attempts'] : null;
 }
 unset($row);
 

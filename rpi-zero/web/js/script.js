@@ -24,6 +24,15 @@
     });
   }
 
+  // success/failed/max — see readings.md's attempt_count/max_attempts in
+  // the `db` project. Rows written before that tracking existed have
+  // neither, so fall back to the plain successful-sample count they
+  // always had.
+  function formatSamples(r) {
+    if (r.attempt_count == null || r.max_attempts == null) return String(r.sample_count);
+    return `${r.sample_count}/${r.attempt_count - r.sample_count}/${r.max_attempts}`;
+  }
+
   function fmtRelative(iso) {
     const diffMs = Date.now() - new Date(iso).getTime();
     const mins = Math.round(diffMs / 60000);
@@ -107,7 +116,9 @@
     el('current-temp').innerHTML = latest.temperature_c.toFixed(1) + '<span class="hero-unit">°C</span><span class="trend-badge" id="temp-trend"></span>';
     el('current-humidity').innerHTML = latest.humidity_pct.toFixed(1) + '<span class="hero-unit">%</span>';
     el('temp-meta').textContent = fmtTime(latest.recorded_at) + ' — ' + fmtRelative(latest.recorded_at);
-    el('humidity-meta').textContent = latest.sample_count + ' sample' + (latest.sample_count === 1 ? '' : 's') + ' averaged';
+    el('humidity-meta').textContent = latest.attempt_count == null || latest.max_attempts == null
+      ? latest.sample_count + ' sample' + (latest.sample_count === 1 ? '' : 's') + ' averaged'
+      : formatSamples(latest) + ' success/failed/max';
     statusLabel = 'Updated ' + fmtRelative(latest.recorded_at);
     renderCountdown();
 
@@ -226,7 +237,7 @@
         <td>${fmtTime(r.recorded_at)}</td>
         <td class="temp-cell">${r.temperature_c.toFixed(1)}</td>
         <td class="humidity-cell">${r.humidity_pct.toFixed(1)}</td>
-        <td>${r.sample_count}</td>
+        <td>${formatSamples(r)}</td>
       </tr>
     `).join('');
   }

@@ -34,11 +34,13 @@ PostgreSQL (Hive, this Pi)  →  api/readings.php, api/daily.php  →  dashboard
 | `web/api/sync_trigger.php` | JSON API backing the Settings tab's "Sync Now" buttons: relays a manual backlog-sync request to a specific Pi Zero's `web/sync.php`. See its docstring |
 | `web/api/deploy_trigger.php` | JSON API backing the Settings tab's "Update Now" buttons: relays a manual pull+redeploy request to a specific Pi Zero's `web/deploy_trigger.php`. See its docstring |
 | `web/api/deploy_webhook.php` | GitHub push webhook receiver: pulls + redeploys the Hive, then relays a deploy trigger to every Pi Zero. See "Push-to-deploy" below |
+| `bin/ping_sensors.php` | Cron-only (not under `web/`): TCP-pings every registered sensor once a minute and stamps `sensors.last_ping_at`, the source of truth for each sensor's ONLINE/OFFLINE badge — see "Sensor liveness pinger" below |
 | `setup/setup_nginx_php.sh` | Installs and configures nginx + PHP-FPM (with `pdo_pgsql`) |
 | `setup/deploy_web.sh` | Syncs `web/` into the nginx web root |
 | `setup/git_deploy.sh` | Pulls the latest `main` and re-runs `deploy_web.sh` — what `deploy_webhook.php` actually runs |
 | `setup/setup_sync_trigger.sh` | Provisions the shared secret used to authenticate `sync_trigger.php`'s requests to each Pi Zero |
 | `setup/setup_deploy_webhook.sh` | Provisions push-to-deploy: the GitHub webhook secret, the fleet-wide deploy token, and the sudo rule `deploy_webhook.php` needs to redeploy as root |
+| `setup/setup_sensor_pinger.sh` | Installs `bin/ping_sensors.php` as a once-a-minute cron job and provisions its `sensor_pinger` DB credentials — see "Sensor liveness pinger" below |
 | `setup/lib/log.sh` | Shared colored logging + quiet-by-default install output for the scripts above |
 
 ## Setup (Raspberry Pi 5)
@@ -47,8 +49,9 @@ Assumes the Hive database (`../../db`) is already deployed and running on
 this Pi. Then, from this directory:
 
 ```bash
-sudo bash setup/setup_nginx_php.sh   # nginx + PHP-FPM + pdo_pgsql
-bash setup/deploy_web.sh             # copy web/ into the nginx web root
+sudo bash setup/setup_nginx_php.sh    # nginx + PHP-FPM + pdo_pgsql
+bash setup/deploy_web.sh              # copy web/ into the nginx web root
+sudo bash setup/setup_sensor_pinger.sh # once-a-minute liveness ping, drives ONLINE/OFFLINE
 ```
 
 By default, package installs (`apt-get`, etc.) run quietly — you just see
@@ -86,6 +89,31 @@ sudo chmod 600 "$(getent passwd www-data | cut -d: -f6)/.pgpass"
 ```
 
 After setup, the dashboard is served at `http://<pi5-address>/`.
+
+## Sensor liveness pinger
+
+`bin/ping_sensors.php` runs on a cron job (`setup/setup_sensor_pinger.sh`,
+every minute) and is the actual source of truth for each sensor's
+ONLINE/OFFLINE badge: it opens a short TCP connection to port 80 on every
+registered sensor's `ip_address` (or `<name>.local` fallback, same
+convention as "Sync Now"/"Update Now" below) and stamps
+`sensors.last_ping_at` on success. `api/readings.php` derives `online`
+from how fresh that timestamp is (`PING_STALE_SECONDS`), not from when a
+sensor last reported a reading — see "Offline sensors" below for why that
+split matters.
+
+This connects as its own `sensor_pinger` role — read/write on `sensors`
+only, kept separate from `web_reader` (deliberately read-only there) and
+from `sensor_writer` (which can also write fabricated readings) — see
+`../../db/database/sensors/meta.md`. Needs the same central-DB
+`last_ping_at` column set up first (see
+`../../db/database/sensors/tables/sensors.md`) and re-running that
+project's `setup_db.py` to create the role, same as the other reporters
+above need their own schema/role pieces.
+
+```bash
+sudo bash setup/setup_sensor_pinger.sh   # installs the cron job, provisions ~/.pgpass
+```
 
 ## Push-to-deploy
 
@@ -140,16 +168,42 @@ waiting for the next push.
   local-time approximation, not real sunrise/sunset — unlike
   `rpi-zero`'s per-sensor dashboard, this avoids an Open-Meteo dependency
   for something that's only ever a rough visual cue here.
-- **Offline sensors**: a sensor with no reading in the last 30 minutes
-  (`OFFLINE_MINUTES` in `readings.php`) is shown greyed-out with a "last
-  seen" time, rather than silently disappearing from the tile grid.
-- **UPS battery status**: a sensor's tile badge reads OK / CHARGING &lt;pct&gt;%
-  / BATTERY &lt;pct&gt;% instead of the plain OK/OFFLINE, driven by the
+- **Offline sensors**: a sensor is ONLINE/OFFLINE based on whether the Hive
+  itself could reach it over the network in the last `PING_STALE_SECONDS`
+  (`readings.php`) — see "Sensor liveness pinger" above — not on how
+  recently it reported a reading. An offline sensor is shown greyed-out
+  with a "last seen" time (from its last actual reading), rather than
+  silently disappearing from the tile grid. This split from reading
+  recency matters: a Pi Zero whose DHT22 has come loose keeps answering
+  pings, so it correctly shows ONLINE + FAULTY DHT22 instead of a
+  misleading OFFLINE — see "DHT22 fault status" below.
+- **Status badges are independent, not exclusive**: a sensor's tile can
+  show ONLINE/OFFLINE, a power badge, and FAULTY DHT22 all at once — e.g.
+  a Pi Zero running on battery with a flaky DHT22 shows ONLINE, BATTERY
+  &lt;pct&gt;% and FAULTY DHT22 together, since a network ping, a UPS HAT's
+  charge state, and a sensor's own read success are three unrelated
+  things. Each is sourced from its own column (`sensors.last_ping_at`,
+  `sensors.status`, `sensors.dht22_fault_at`) and rendered as its own
+  badge — see `web/js/script.js`'s `renderTiles()`.
+- **UPS battery status**: the power badge reads CHARGING &lt;pct&gt;% /
+  BATTERY &lt;pct&gt;% (omitted entirely when OK), driven by the
   `sensors.status` column — see `../rpi-zero/README.md`'s "UPS battery
   status" section for the Pi Zero side (`ups_ina219.py`, opt-in per sensor,
-  needs a UPS HAT). An offline sensor still shows OFFLINE regardless of its
-  last-known status; a sensor with no UPS HAT (or `status` not yet written)
-  shows OK once online, same as before this column existed.
+  needs a UPS HAT). A sensor with no UPS HAT (or `status` not yet written)
+  just never shows this badge.
+- **DHT22 fault status**: a sensor whose DHT22 exhausted every read attempt
+  on its last run (came loose, wiring fault, ...) shows a FAULTY DHT22
+  badge, driven by the `sensors.dht22_fault_at` column — see
+  `../rpi-zero/README.md`'s "DHT22 fault reporting" section for the Pi
+  Zero side (`dht22_logger.py`). It clears itself the moment a later run
+  gets at least one successful read — nothing to reset by hand.
+- **Samples**: the recent-readings table's Samples column reads
+  success/failed/max instead of a bare count wherever a row has that
+  detail — e.g. `4/1/50` means 4 successful reads, 1 failed, out of a
+  50-attempt ceiling — driven by the `readings.attempt_count`/
+  `max_attempts` columns (see
+  `../../db/database/sensors/tables/readings.md`). Rows predating this
+  tracking just show the successful count on its own, same as before.
 - **Sensor uptime**: the Settings tab's Sensors section shows each Pi Zero's
   uptime since it last booted (e.g. "3d 4h"), next to its online/offline
   badge and LAN address, driven by the `sensors.uptime_seconds` column — see
