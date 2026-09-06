@@ -2,6 +2,7 @@
   const READINGS_URL = 'api/readings.php';
   const DAILY_URL = 'api/daily.php';
   const FORECAST_URL = 'api/forecast.php';
+  const GEOCODE_URL = 'api/geocode.php';
   const SETTINGS_URL = 'api/settings.php';
   const SYNC_TRIGGER_URL = 'api/sync_trigger.php';
   const DEPLOY_TRIGGER_URL = 'api/deploy_trigger.php';
@@ -50,6 +51,20 @@
   let forecastRange = localStorage.getItem(FORECAST_RANGE_STORAGE_KEY) || '24h';
   let forecastReadings = []; // Open-Meteo hourly forecast rows, api/forecast.php's shape
   let forecastLoaded = false; // loaded lazily, the first time the Forecast tab is opened
+
+  // This profile's saved forecast locations (Settings tab's Forecast
+  // section) and which one (if any) is active — settings.php's `places`/
+  // `active_place_id`, see its docstring and
+  // ../../../../db/database/sensors/tables/forecast_places.md. Both stay
+  // empty/null for a logged-out visitor, same convention as sensorLabels:
+  // no profile means no saved places, and the Forecast tab plots
+  // api/forecast.php's own hardcoded default location (Brno) instead.
+  let forecastPlaces = []; // [{id, name, latitude, longitude}]
+  let activePlaceId = null;
+
+  function activePlace() {
+    return forecastPlaces.find((p) => p.id === activePlaceId) || null;
+  }
 
   // -- Settings (password-profile-backed range persistence) -------------------
   // See api/settings.php's docstring: no username, a password just picks a
@@ -237,9 +252,23 @@
     }
   }
 
+  // Reflects the currently active place (or the default, "Brno") into the
+  // Forecast tab's chart title — kept in sync with forecastPlaces/
+  // activePlaceId by every caller that can change either (applyRangesFromSettings,
+  // logout).
+  function updateForecastTitle() {
+    const place = activePlace();
+    el('forecast-title').textContent = `Temperature forecast — ${place ? place.name : 'Brno'} (Open-Meteo)`;
+  }
+
   async function loadForecast() {
     try {
-      const payload = await fetchJson(`${FORECAST_URL}?range=${encodeURIComponent(forecastRange)}`);
+      const place = activePlace();
+      let url = `${FORECAST_URL}?range=${encodeURIComponent(forecastRange)}`;
+      if (place) {
+        url += `&lat=${encodeURIComponent(place.latitude)}&lon=${encodeURIComponent(place.longitude)}`;
+      }
+      const payload = await fetchJson(url);
       forecastReadings = payload.readings || [];
       el('forecast-empty-state').hidden = forecastReadings.length > 0;
       el('section-forecast').style.display = forecastReadings.length ? 'block' : 'none';
@@ -1039,6 +1068,7 @@
     renderSettingsCurrent();
     renderRangesEditor();
     renderLabelList();
+    renderPlacesList();
     renderSyncList();
   }
 
@@ -1057,6 +1087,17 @@
       renderTiles();
       drawTable();
     }
+
+    // Places are private too — drop them and fall back to the Forecast
+    // tab's default location (Brno), reloading it if a custom place had
+    // actually been active.
+    const hadActivePlace = activePlaceId !== null;
+    forecastPlaces = [];
+    activePlaceId = null;
+    el('places-list').innerHTML = '';
+    el('places-results').hidden = true;
+    el('places-results').innerHTML = '';
+    updateForecastTitle();
 
     // Revert to the fixed default chip set. If either tab's active
     // selection was a custom token that only existed in the profile just
@@ -1079,6 +1120,8 @@
     if (changed) {
       loadReadings();
       if (forecastLoaded) loadForecast();
+    } else if (hadActivePlace && forecastLoaded) {
+      loadForecast();
     }
   }
 
@@ -1106,6 +1149,11 @@
     renderChips('forecast-range-chips', forecastRange);
     // This profile's own sensor labels — see sensorLabels above.
     sensorLabels = settings.labels || {};
+    // ...and its saved forecast places — see forecastPlaces above.
+    forecastPlaces = Array.isArray(settings.places) ? settings.places : [];
+    activePlaceId = settings.active_place_id ?? null;
+    renderPlacesList();
+    updateForecastTitle();
   }
 
   // Fire-and-forget save, called from the range-chip handlers below when
@@ -1352,6 +1400,177 @@
     if (!input) return;
     e.preventDefault();
     saveSensorLabel(input.closest('.label-item'));
+  });
+
+  // -- Forecast places (Settings tab, Forecast section) ------------------------
+  // Only shown logged in, same as the ranges editor and sensor labels above
+  // — a place saved here is private to this profile (settings.php's
+  // `forecast_places`/`active_place_id`), unlike the shared `sensors`
+  // registry the Sensors section below lists. See forecastPlaces/
+  // activePlaceId above and applyRangesFromSettings(), which is what
+  // actually keeps them in sync with the server after every mutation here.
+  // A permanent "Brno (default)" row always leads the list, representing
+  // api/forecast.php's own hardcoded fallback location (activePlaceId ===
+  // null) — so there's always exactly one ACTIVE row to point at, and a
+  // way back to the default without having to remove every saved place.
+  function renderPlacesList() {
+    const list = el('places-list');
+    if (!list) return;
+    list.innerHTML = '';
+    const rows = [{ id: null, name: 'Brno (default)', latitude: null, longitude: null }, ...forecastPlaces];
+    rows.forEach((p) => {
+      const isActive = p.id === activePlaceId;
+      const li = document.createElement('li');
+      li.className = 'places-item' + (isActive ? ' active' : '');
+
+      const name = document.createElement('span');
+      name.className = 'places-item-name';
+      name.textContent = p.name;
+      li.appendChild(name);
+
+      if (p.latitude !== null) {
+        const coords = document.createElement('span');
+        coords.className = 'places-item-coords';
+        coords.textContent = `${p.latitude.toFixed(2)}, ${p.longitude.toFixed(2)}`;
+        li.appendChild(coords);
+      }
+
+      if (isActive) {
+        const badge = document.createElement('span');
+        badge.className = 'places-item-badge';
+        badge.textContent = 'ACTIVE';
+        li.appendChild(badge);
+      } else {
+        const use = document.createElement('button');
+        use.type = 'button';
+        use.className = 'places-item-btn';
+        use.dataset.action = 'activate';
+        use.dataset.id = p.id === null ? '' : String(p.id);
+        use.textContent = 'Use';
+        li.appendChild(use);
+      }
+
+      if (p.id !== null) {
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'places-item-btn remove';
+        remove.dataset.action = 'remove';
+        remove.dataset.id = String(p.id);
+        remove.title = 'Remove';
+        remove.textContent = '✕';
+        li.appendChild(remove);
+      }
+
+      list.appendChild(li);
+    });
+  }
+
+  function placesError(message) {
+    const box = el('places-error');
+    box.textContent = message;
+    box.hidden = false;
+  }
+
+  // Applies the fresh `settings` a places mutation (add/remove/activate)
+  // handed back, then reloads the Forecast tab if it's ever been opened —
+  // the active place (and so the location being plotted) may well have
+  // just changed.
+  function applyPlacesResult(payload) {
+    el('places-error').hidden = true;
+    applyRangesFromSettings(payload.settings);
+    if (forecastLoaded) loadForecast();
+  }
+
+  async function activatePlace(id) {
+    try {
+      applyPlacesResult(await postSettings('set_active_place', { id }));
+    } catch (err) {
+      placesError(err.message);
+    }
+  }
+
+  async function removePlace(id) {
+    try {
+      applyPlacesResult(await postSettings('remove_place', { id }));
+    } catch (err) {
+      placesError(err.message);
+    }
+  }
+
+  async function addPlace(name, latitude, longitude) {
+    try {
+      applyPlacesResult(await postSettings('add_place', { name, latitude, longitude }));
+      el('places-results').hidden = true;
+      el('places-results').innerHTML = '';
+      el('places-search-input').value = '';
+    } catch (err) {
+      placesError(err.message);
+    }
+  }
+
+  el('places-list').addEventListener('click', (e) => {
+    const btn = e.target.closest('.places-item-btn');
+    if (!btn || btn.disabled) return;
+    // The default row's "Use" button carries an empty id — Number('') is
+    // 0, not null, so that has to be checked before converting.
+    const id = btn.dataset.id === '' ? null : Number(btn.dataset.id);
+    if (btn.dataset.action === 'activate') activatePlace(id);
+    else if (btn.dataset.action === 'remove') removePlace(id);
+  });
+
+  // Renders api/geocode.php's search results as a pick list — each one an
+  // "Add" button carrying its name/latitude/longitude in data attributes,
+  // so clicking it doesn't need a second round trip to know what it's
+  // adding.
+  function renderPlacesResults(results) {
+    const list = el('places-results');
+    list.innerHTML = '';
+    results.forEach((r) => {
+      const li = document.createElement('li');
+      li.className = 'places-result-item';
+
+      const name = document.createElement('span');
+      name.className = 'places-result-name';
+      name.textContent = r.name;
+
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.className = 'places-item-btn';
+      add.dataset.name = r.name;
+      add.dataset.lat = String(r.latitude);
+      add.dataset.lon = String(r.longitude);
+      add.textContent = 'Add';
+
+      li.append(name, add);
+      list.appendChild(li);
+    });
+    list.hidden = results.length === 0;
+  }
+
+  el('places-search-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    el('places-error').hidden = true;
+    const input = el('places-search-input');
+    const q = input.value.trim();
+    if (!q) return;
+    try {
+      const payload = await fetchJson(`${GEOCODE_URL}?q=${encodeURIComponent(q)}`);
+      const results = payload.results || [];
+      if (!results.length) {
+        placesError(`No places found for "${q}".`);
+        el('places-results').hidden = true;
+        return;
+      }
+      renderPlacesResults(results);
+    } catch (err) {
+      placesError(err.message);
+    }
+  });
+
+  el('places-results').addEventListener('click', (e) => {
+    const btn = e.target.closest('.places-item-btn');
+    if (!btn) return;
+    addPlace(btn.dataset.name, Number(btn.dataset.lat), Number(btn.dataset.lon));
   });
 
   // Renders seconds-since-boot (sensors.uptime_seconds, from

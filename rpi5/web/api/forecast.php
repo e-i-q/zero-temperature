@@ -1,6 +1,6 @@
 <?php
 /**
- * forecast.php — Brno weather forecast from Open-Meteo, for the Hive
+ * forecast.php — weather forecast from Open-Meteo, for the Hive
  * dashboard's Forecast tab. Same shape and caching approach as
  * rpi-zero/web/weather.php, but looks forward instead of back: that
  * endpoint clips Open-Meteo's response to [now-delta, now] so no
@@ -8,7 +8,11 @@
  * clips to [now, now+delta] so no past data leaks into a forecast.
  *
  * No database involved (unlike readings.php/daily.php) — this is a plain
- * proxy/cache in front of Open-Meteo, same as weather.php.
+ * proxy/cache in front of Open-Meteo, same as weather.php. Per-profile
+ * *place* persistence (saving named locations, picking which one is
+ * active) lives entirely in api/settings.php's `forecast_places` support —
+ * this endpoint just plots whatever coordinates it's handed, unaware of
+ * profiles or the database that stores them.
  *
  * Query params (all optional):
  *   ?range=24h   A <number><unit> token (unit one of h/d/w/m — hours, days,
@@ -19,13 +23,21 @@
  *                free forecast API only looks FORECAST_DAYS_MAX days ahead,
  *                so anything past that (including "all") is clamped to that
  *                ceiling rather than its literal meaning.
+ *   ?lat=49.19   Forecast location, WGS84 decimal degrees. Both or neither —
+ *   ?lon=16.61   defaults to DEFAULT_LATITUDE/DEFAULT_LONGITUDE (Brno,
+ *                the dashboard's original hardcoded location) when omitted,
+ *                which is what a logged-out visitor (or a profile with no
+ *                active forecast_places row — see settings.php's
+ *                `active_place_id`) gets. The Forecast tab passes its
+ *                logged-in profile's active place's coordinates here once
+ *                one is set.
  */
 
 declare(strict_types=1);
 
 // -- Configuration --------------------------------------------------------
-const WEATHER_LATITUDE = 49.1951;  // Brno — same location as rpi-zero/web/weather.php
-const WEATHER_LONGITUDE = 16.6068;
+const DEFAULT_LATITUDE = 49.1951;  // Brno — same location as rpi-zero/web/weather.php, and this
+const DEFAULT_LONGITUDE = 16.6068; // dashboard's only location before per-profile places existed
 const FORECAST_DAYS_MAX = 16;      // Open-Meteo's free-tier ceiling for /v1/forecast
 const FORECAST_CACHE_TTL = 1800;   // 30 minutes, same as weather.php — forecasts don't move minute to minute
 const DEFAULT_RANGE = '24h';
@@ -50,18 +62,23 @@ function fail(int $httpCode, string $message): never {
     exit;
 }
 
-function forecastCachePath(): string {
-    return sys_get_temp_dir() . '/dht22_forecast_cache.json';
+// One cache file per location (rounded to ~11m precision — plenty for a
+// weather forecast, and keeps two profiles that both add "Brno" sharing one
+// cached fetch instead of duplicating it) so different profiles' places
+// don't clobber or evict each other's 30-minute cache the way a single
+// fixed-path file would.
+function forecastCachePath(float $lat, float $lon): string {
+    return sys_get_temp_dir() . '/dht22_forecast_cache_' . sprintf('%.4f_%.4f', $lat, $lon) . '.json';
 }
 
-function fetchForecastFromApi(): ?array {
+function fetchForecastFromApi(float $lat, float $lon): ?array {
     // Hourly resolution is plenty for a forward-looking chart (unlike
     // weather.php's minutely_15, which exists to compare closely against
     // DHT22 readings taken every few minutes) and keeps FORECAST_DAYS_MAX
     // days of data small: 16 * 24 = 384 points.
     $url = 'https://api.open-meteo.com/v1/forecast?' . http_build_query([
-        'latitude'      => WEATHER_LATITUDE,
-        'longitude'     => WEATHER_LONGITUDE,
+        'latitude'      => $lat,
+        'longitude'     => $lon,
         'hourly'        => 'temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code,rain,snowfall',
         'timezone'      => 'UTC', // keep instants comparable to recorded_at, which is UTC
         'forecast_days' => FORECAST_DAYS_MAX,
@@ -102,12 +119,12 @@ function fetchForecastFromApi(): ?array {
     return $rows;
 }
 
-function getForecastRows(): array {
-    $cachePath = forecastCachePath();
+function getForecastRows(float $lat, float $lon): array {
+    $cachePath = forecastCachePath($lat, $lon);
     $cacheFresh = is_file($cachePath) && (time() - filemtime($cachePath)) < FORECAST_CACHE_TTL;
 
     if (!$cacheFresh) {
-        $fetched = fetchForecastFromApi();
+        $fetched = fetchForecastFromApi($lat, $lon);
         if ($fetched !== null) {
             file_put_contents($cachePath, json_encode($fetched));
             return $fetched;
@@ -137,7 +154,30 @@ if ($rawHoursAhead === null) {
 $hoursAhead = min($rawHoursAhead, FORECAST_DAYS_MAX * 24);
 $clamped = $rawHoursAhead > FORECAST_DAYS_MAX * 24;
 
-$all = getForecastRows();
+// `lat`/`lon` are either both present (a profile's active place, or one
+// being tried out ahead of saving it) or both absent (Brno) — one without
+// the other is almost certainly a caller bug, so it fails loudly rather
+// than silently mixing a given lat with the default lon.
+$latParam = $_GET['lat'] ?? null;
+$lonParam = $_GET['lon'] ?? null;
+if (($latParam === null) !== ($lonParam === null)) {
+    fail(400, 'lat and lon must be given together.');
+}
+if ($latParam !== null) {
+    if (!is_numeric($latParam) || !is_numeric($lonParam)) {
+        fail(400, 'lat/lon must be numbers.');
+    }
+    $latitude = (float) $latParam;
+    $longitude = (float) $lonParam;
+    if ($latitude < -90 || $latitude > 90 || $longitude < -180 || $longitude > 180) {
+        fail(400, 'lat must be in [-90, 90] and lon in [-180, 180].');
+    }
+} else {
+    $latitude = DEFAULT_LATITUDE;
+    $longitude = DEFAULT_LONGITUDE;
+}
+
+$all = getForecastRows($latitude, $longitude);
 
 // Forward-looking view, mirror image of weather.php's backward clip: keep
 // [now, now+hoursAhead] so nothing from the past sneaks in and the horizon
@@ -154,6 +194,8 @@ $soonest = !empty($readings) ? $readings[0] : null;
 $payload = [
     'generated_at'      => gmdate('c'),
     'range'             => $range,
+    'latitude'          => $latitude,  // echoed back so the client can confirm which place this actually plotted
+    'longitude'         => $longitude,
     'forecast_days_max' => FORECAST_DAYS_MAX,
     'clamped'           => $clamped, // true if $range asked for more than Open-Meteo can give
     'count'             => count($readings),

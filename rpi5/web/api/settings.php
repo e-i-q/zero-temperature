@@ -6,15 +6,16 @@
  * can read and change that profile's saved settings from any browser. This
  * is NOT a security boundary protecting sensitive data — see
  * ../../../../db/database/sensors/meta.md's Users table, where this reuses
- * web_reader's own DB credentials, now also granted read/write on `settings`
- * and `passwords`. A second role (and a second ~/.pgpass entry) felt like a
- * lot of new moving parts for a feature that only ever decides which chart
- * ranges are offered and which one loads first. It's a convenience so your
- * choices follow you across browsers/devices, nothing more — a visitor who
- * never logs in just keeps using their browser's own localStorage and the
- * fixed default chip set, exactly as before this feature existed.
+ * web_reader's own DB credentials, now also granted read/write on
+ * `settings`, `passwords` and `forecast_places`. A second role (and a
+ * second ~/.pgpass entry) felt like a lot of new moving parts for a
+ * feature that only ever decides which chart ranges/forecast places are
+ * offered and which ones are active. It's a convenience so your choices
+ * follow you across browsers/devices, nothing more — a visitor who never
+ * logs in just keeps using their browser's own localStorage and the fixed
+ * default chip set, exactly as before this feature existed.
  *
- * A profile stores three things:
+ * A profile stores four things:
  *   - `ranges`: the ordered, user-editable set of time-span chips offered on
  *     BOTH the Overview and Forecast tabs (they're the same list — those two
  *     tabs have always shown identical chip sets, just interpreted
@@ -34,6 +35,17 @@
  *     sharing one Hive may want to call the same sensor something
  *     different — see ../../../../db/database/sensors/tables/settings.md
  *     for the on-disk encoding.
+ *   - forecast places: this profile's own saved locations for the Forecast
+ *     tab (Settings tab's "Forecast" section), one row per place in the
+ *     `forecast_places` table plus a pointer (`settings.active_place_id`)
+ *     at whichever one is currently shown — see
+ *     ../../../../db/database/sensors/tables/forecast_places.md. Found via
+ *     api/geocode.php's place-name search (a plain Open-Meteo proxy, no DB
+ *     involved) before being added here. A profile with no places, or
+ *     whose active one was removed, falls back to api/forecast.php's own
+ *     hardcoded default location (Brno) — exactly how the Forecast tab
+ *     behaved before this feature existed, and still how a logged-out
+ *     visitor sees it.
  *
  * Known, accepted simplifications (fine at this project's scale, revisit if
  * that ever changes):
@@ -66,7 +78,20 @@
  *   {"action": "save",   "overview_range": "24h", "forecast_range": "24h"}
  *   {"action": "save_ranges", "ranges": ["6h", "12h", "24h", "2d", "5d", "1w", "1m"]}
  *   {"action": "save_sensor_label", "sensor": "dht22-01", "label": "Kitchen"}
+ *   {"action": "add_place", "name": "Brno, South Moravian Region, Czechia", "latitude": 49.19522, "longitude": 16.60796}
+ *   {"action": "remove_place", "id": 3}
+ *   {"action": "set_active_place", "id": 3}   // id: null resets to the default location
  *   {"action": "logout"}
+ *
+ * `add_place`/`remove_place`/`set_active_place` manage the logged-in
+ * profile's `forecast_places` rows and `settings.active_place_id` pointer
+ * — see the docstring above and
+ * ../../../../db/database/sensors/tables/forecast_places.md. `add_place`
+ * takes whatever a api/geocode.php search result handed the client
+ * (`name`/`latitude`/`longitude`) rather than a free-typed name, so every
+ * saved place is something Open-Meteo can actually forecast for; the first
+ * place a profile ever adds becomes active automatically since there's no
+ * reason to make someone click twice to see the one place they just added.
  *
  * `save_sensor_label` sets one entry of the logged-in profile's own
  * `settings.sensor_labels` map (see
@@ -86,6 +111,8 @@ declare(strict_types=1);
 const SESSION_LIFETIME_DAYS = 60;
 const MAX_RANGES = 12; // sane ceiling on how many chips one profile can pile up
 const MAX_LABEL_LEN = 40; // sane ceiling on a sensor label's length (fits a tile's watermark)
+const MAX_PLACES = 8; // sane ceiling on how many forecast locations one profile can save
+const MAX_PLACE_NAME_LEN = 120; // fits geocode.php's longest composed "name, admin1, country" label
 
 // Keep the server-side session file alive as long as the cookie claims it
 // is. Only fixes GC triggered by this request (gc_probability, which
@@ -154,13 +181,38 @@ function encodeLabels(array $labels): string {
     return implode(',', $parts);
 }
 
+// This profile's saved forecast_places rows, oldest first (insertion order
+// doubles as display order — there's no separate position column, unlike
+// `ranges`, since reordering a handful of places wasn't worth the extra
+// UI). Each entry's `latitude`/`longitude` come back as PHP floats (PDO
+// hands back PostgreSQL `real` as numeric strings otherwise).
+function fetchPlaces(PDO $pdo, int $passwordId): array {
+    $stmt = $pdo->prepare('SELECT id, name, latitude, longitude FROM forecast_places WHERE password_id = :id ORDER BY id');
+    $stmt->bindValue(':id', $passwordId, PDO::PARAM_INT);
+    $stmt->execute();
+    $places = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $places[] = [
+            'id'        => (int) $row['id'],
+            'name'      => $row['name'],
+            'latitude'  => (float) $row['latitude'],
+            'longitude' => (float) $row['longitude'],
+        ];
+    }
+    return $places;
+}
+
 // Reads a profile's settings row, normalizing a NULL/empty `ranges` column
 // (either a pre-existing profile from before this column existed, or one
 // that's never customized its list) to the default set. Returns `ranges` as
 // an array and `labels` as a [sensor name => label] map — everywhere else in
-// this file works with those, not the stored comma strings.
+// this file works with those, not the stored comma strings. `places` and
+// `active_place_id` cover the Forecast section — `active_place_id` is
+// re-verified against `places` here (rather than trusted blindly from the
+// column) so a row deleted by hand outside remove_place still resolves to
+// "no active place" instead of pointing at nothing.
 function currentSettings(PDO $pdo, int $passwordId): ?array {
-    $stmt = $pdo->prepare('SELECT overview_range, forecast_range, ranges, sensor_labels FROM settings WHERE password_id = :id');
+    $stmt = $pdo->prepare('SELECT overview_range, forecast_range, ranges, sensor_labels, active_place_id FROM settings WHERE password_id = :id');
     $stmt->bindValue(':id', $passwordId, PDO::PARAM_INT);
     $stmt->execute();
     $row = $stmt->fetch();
@@ -168,11 +220,18 @@ function currentSettings(PDO $pdo, int $passwordId): ?array {
         return null;
     }
     $rangesStr = ($row['ranges'] !== null && $row['ranges'] !== '') ? $row['ranges'] : implode(',', DEFAULT_RANGES);
+    $places = fetchPlaces($pdo, $passwordId);
+    $activePlaceId = $row['active_place_id'] !== null ? (int) $row['active_place_id'] : null;
+    if ($activePlaceId !== null && !in_array($activePlaceId, array_column($places, 'id'), true)) {
+        $activePlaceId = null;
+    }
     return [
-        'overview_range' => $row['overview_range'],
-        'forecast_range' => $row['forecast_range'],
-        'ranges'         => explode(',', $rangesStr),
-        'labels'         => decodeLabels($row['sensor_labels']),
+        'overview_range'  => $row['overview_range'],
+        'forecast_range'  => $row['forecast_range'],
+        'ranges'          => explode(',', $rangesStr),
+        'labels'          => decodeLabels($row['sensor_labels']),
+        'places'          => $places,
+        'active_place_id' => $activePlaceId,
     ];
 }
 
@@ -270,7 +329,14 @@ switch ($action) {
         $_SESSION['password_id'] = $newId;
         echo json_encode([
             'ok'       => true,
-            'settings' => ['overview_range' => $overviewRange, 'forecast_range' => $forecastRange, 'ranges' => DEFAULT_RANGES, 'labels' => []],
+            'settings' => [
+                'overview_range'  => $overviewRange,
+                'forecast_range'  => $forecastRange,
+                'ranges'          => DEFAULT_RANGES,
+                'labels'          => [],
+                'places'          => [], // brand new profile — nothing saved yet
+                'active_place_id' => null,
+            ],
         ]);
         break;
     }
@@ -346,7 +412,14 @@ switch ($action) {
         ]);
         echo json_encode([
             'ok'       => true,
-            'settings' => ['ranges' => $clean, 'overview_range' => $overviewRange, 'forecast_range' => $forecastRange, 'labels' => $current['labels']],
+            'settings' => [
+                'ranges'          => $clean,
+                'overview_range'  => $overviewRange,
+                'forecast_range'  => $forecastRange,
+                'labels'          => $current['labels'],
+                'places'          => $current['places'],
+                'active_place_id' => $current['active_place_id'],
+            ],
         ]);
         break;
     }
@@ -385,6 +458,133 @@ switch ($action) {
         $stmt = $pdo->prepare('UPDATE settings SET sensor_labels = :labels WHERE password_id = :pid');
         $stmt->execute(['labels' => encodeLabels($labels), 'pid' => $passwordId]);
         echo json_encode(['ok' => true, 'sensor' => $sensorName, 'label' => $label === '' ? null : $label]);
+        break;
+    }
+
+    case 'add_place': {
+        $passwordId = $_SESSION['password_id'] ?? null;
+        if (!$passwordId) {
+            fail(401, 'Not logged in.');
+        }
+        $name = trim((string) ($input['name'] ?? ''));
+        if ($name === '') {
+            fail(400, 'name is required.');
+        }
+        if (strlen($name) > MAX_PLACE_NAME_LEN) {
+            fail(400, 'name must be at most ' . MAX_PLACE_NAME_LEN . ' characters.');
+        }
+        $lat = $input['latitude'] ?? null;
+        $lon = $input['longitude'] ?? null;
+        if (!is_numeric($lat) || !is_numeric($lon)) {
+            fail(400, 'latitude/longitude must be numbers.');
+        }
+        $lat = (float) $lat;
+        $lon = (float) $lon;
+        if ($lat < -90 || $lat > 90 || $lon < -180 || $lon > 180) {
+            fail(400, 'latitude must be in [-90, 90] and longitude in [-180, 180].');
+        }
+
+        $countStmt = $pdo->prepare('SELECT COUNT(*) FROM forecast_places WHERE password_id = :pid');
+        $countStmt->execute(['pid' => $passwordId]);
+        if ((int) $countStmt->fetchColumn() >= MAX_PLACES) {
+            fail(400, 'At most ' . MAX_PLACES . ' places are allowed — remove one first.');
+        }
+
+        try {
+            $pdo->beginTransaction();
+            $ins = $pdo->prepare(
+                'INSERT INTO forecast_places (password_id, name, latitude, longitude, created_at) VALUES (:pid, :name, :lat, :lon, :created_at)'
+            );
+            $ins->execute([
+                'pid'        => $passwordId,
+                'name'       => $name,
+                'lat'        => $lat,
+                'lon'        => $lon,
+                'created_at' => gmdate('Y-m-d H:i:s'),
+            ]);
+            $newId = (int) $pdo->lastInsertId('forecast_places_id_seq');
+            // A profile's first place becomes active on its own — otherwise
+            // adding it would do nothing visible until a second click.
+            $active = $pdo->prepare('SELECT active_place_id FROM settings WHERE password_id = :pid');
+            $active->execute(['pid' => $passwordId]);
+            if ($active->fetchColumn() === null) {
+                $setActive = $pdo->prepare('UPDATE settings SET active_place_id = :place_id WHERE password_id = :pid');
+                $setActive->execute(['place_id' => $newId, 'pid' => $passwordId]);
+            }
+            $pdo->commit();
+        } catch (PDOException $e) {
+            $pdo->rollBack();
+            fail(500, 'Could not save that place: ' . $e->getMessage());
+        }
+
+        $settings = currentSettings($pdo, (int) $passwordId);
+        echo json_encode(['ok' => true, 'settings' => $settings]);
+        break;
+    }
+
+    case 'remove_place': {
+        $passwordId = $_SESSION['password_id'] ?? null;
+        if (!$passwordId) {
+            fail(401, 'Not logged in.');
+        }
+        $placeId = $input['id'] ?? null;
+        if (!is_int($placeId) && !(is_string($placeId) && ctype_digit($placeId))) {
+            fail(400, 'id is required.');
+        }
+        $placeId = (int) $placeId;
+
+        $find = $pdo->prepare('SELECT 1 FROM forecast_places WHERE id = :id AND password_id = :pid');
+        $find->execute(['id' => $placeId, 'pid' => $passwordId]);
+        if (!$find->fetchColumn()) {
+            fail(404, 'No such place.');
+        }
+
+        try {
+            $pdo->beginTransaction();
+            $del = $pdo->prepare('DELETE FROM forecast_places WHERE id = :id AND password_id = :pid');
+            $del->execute(['id' => $placeId, 'pid' => $passwordId]);
+            // Falls back to api/forecast.php's default location rather than
+            // pointing at a place that no longer exists.
+            $clear = $pdo->prepare('UPDATE settings SET active_place_id = NULL WHERE password_id = :pid AND active_place_id = :id');
+            $clear->execute(['pid' => $passwordId, 'id' => $placeId]);
+            $pdo->commit();
+        } catch (PDOException $e) {
+            $pdo->rollBack();
+            fail(500, 'Could not remove that place: ' . $e->getMessage());
+        }
+
+        $settings = currentSettings($pdo, (int) $passwordId);
+        echo json_encode(['ok' => true, 'settings' => $settings]);
+        break;
+    }
+
+    case 'set_active_place': {
+        $passwordId = $_SESSION['password_id'] ?? null;
+        if (!$passwordId) {
+            fail(401, 'Not logged in.');
+        }
+        $placeId = $input['id'] ?? null;
+        if ($placeId === null) {
+            // Explicit reset to the default location (Brno) — not "field
+            // omitted", since a JSON body always sends this key.
+            $stmt = $pdo->prepare('UPDATE settings SET active_place_id = NULL WHERE password_id = :pid');
+            $stmt->execute(['pid' => $passwordId]);
+        } else {
+            if (!is_int($placeId) && !(is_string($placeId) && ctype_digit($placeId))) {
+                fail(400, 'id must be an integer or null.');
+            }
+            $placeId = (int) $placeId;
+            $find = $pdo->prepare('SELECT 1 FROM forecast_places WHERE id = :id AND password_id = :pid');
+            $find->execute(['id' => $placeId, 'pid' => $passwordId]);
+            if (!$find->fetchColumn()) {
+                fail(404, 'No such place.');
+            }
+            $stmt = $pdo->prepare('UPDATE settings SET active_place_id = :id WHERE password_id = :pid');
+            $stmt->execute(['id' => $placeId, 'pid' => $passwordId]);
+        }
+
+        $settings = currentSettings($pdo, (int) $passwordId);
+        echo json_encode(['ok' => true, 'settings' => $settings]);
         break;
     }
 
