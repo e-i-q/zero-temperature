@@ -38,7 +38,12 @@ $q = trim((string) ($_GET['q'] ?? ''));
 if ($q === '') {
     fail(400, 'q is required.');
 }
-if (mb_strlen($q) > QUERY_MAX_LEN) {
+// Plain strlen(), not mb_strlen() — the mbstring extension isn't installed
+// on the Hive (same minimal PHP install forecast.php's docstring notes has
+// no php-curl either), and a byte-length cap is a fine approximation for a
+// sane ceiling like this one anyway, same convention MAX_LABEL_LEN/
+// MAX_PLACE_NAME_LEN already use in settings.php.
+if (strlen($q) > QUERY_MAX_LEN) {
     fail(400, 'q must be at most ' . QUERY_MAX_LEN . ' characters.');
 }
 
