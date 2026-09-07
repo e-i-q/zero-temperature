@@ -90,7 +90,7 @@ body {
 .page {
   max-width: 1180px;
   margin: 0 auto;
-  padding: 32px 24px 72px;
+  padding: 20px 24px 32px;
 }
 
 h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
@@ -133,9 +133,9 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding-bottom: 16px;
+  padding-bottom: 12px;
   border-bottom: 1px solid var(--color-divider);
-  margin-bottom: 20px;
+  margin-bottom: 14px;
   flex-wrap: wrap;
 }
 
@@ -203,7 +203,7 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 14px;
-  margin-bottom: 20px;
+  margin-bottom: 14px;
 }
 
 .range-chips { display: flex; border: 1px solid var(--color-divider-strong); }
@@ -736,7 +736,7 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
 }
 
 /* -- Chart cards ------------------------------------------------------------ */
-.chart-card { padding: 14px 16px; margin-bottom: 16px; }
+.chart-card { padding: 10px 14px; margin-bottom: 10px; }
 
 .chart-head {
   display: flex;
@@ -756,7 +756,7 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
 
 .chart-note { font: 400 10px var(--font-mono); color: var(--color-text-muted); }
 
-.chart-wrap { margin-top: 10px; position: relative; }
+.chart-wrap { margin-top: 6px; position: relative; }
 .chart-wrap svg { width: 100%; height: auto; display: block; cursor: crosshair; }
 
 /* Wraps one .chart-card per forecast place — see buildForecastCard() in
