@@ -706,6 +706,70 @@
     return HOUR_STEPS[HOUR_STEPS.length - 1];
   }
 
+  const MONTH_STEPS = [1, 2, 3, 4, 6, 12, 24, 36, 60];
+
+  // Time axis ticks shared by the Overview and Forecast charts (drawChart(),
+  // drawForecastChart()) - returns [{time, label, major}], where `major`
+  // marks a day (or month) boundary tick for the bolder gridline treatment.
+  //
+  // Below a ~60-day range this steps by hourTickStep()'s hours, same as
+  // before, but anchored to local midnight rather than to the first whole
+  // hour at/after tMin. That anchor matters: every HOUR_STEPS value is
+  // either a divisor or a multiple of 24, so a midnight-anchored lattice is
+  // guaranteed to land exactly on midnight at the expected cadence, however
+  // tMin happens to be offset from it. Anchoring to an arbitrary hour offset
+  // instead (the old behavior) meant midnight - and with it, the only tick
+  // that ever printed a date - could fall between lattice points for the
+  // *entire* visible range, e.g. a forecast fetched at 14:00 stepping every
+  // 8h lands on 14, 22, 06, 14, 22, 06, ... and never once on 00. That's
+  // exactly what a 5-day range showing hour-only labels looks like: days
+  // are more informative than hours once the range spans more than one, so
+  // every day in range must get a labeled tick, not just whichever hours
+  // the step lattice happens to land on.
+  //
+  // Above ~60 days - HOUR_STEPS' own ceiling, and the point where a further
+  // day-multiple step would drift away from calendar month boundaries the
+  // longer the range gets - ticks switch to whole months anchored to the
+  // 1st, same convention as the long-term chart's own month ticks
+  // (drawLongChart()): months are more informative than days at that scale,
+  // so each visible month gets its own label instead of a handful of
+  // arbitrary ~30-day-spaced dates.
+  function timeAxisTicks(tMin, tMax, plotW) {
+    const rangeHours = (tMax - tMin) / 3600000;
+    const rangeDays = rangeHours / 24;
+    const ticks = [];
+
+    if (rangeDays > 60) {
+      const labelWidthPx = 34; // "Sep" - matches drawLongChart()'s own month label
+      const maxTicks = Math.max(2, Math.floor(plotW / labelWidthPx));
+      const rangeMonths = rangeDays / 30;
+      let stepMonths = MONTH_STEPS[MONTH_STEPS.length - 1];
+      for (const step of MONTH_STEPS) {
+        if (rangeMonths / step <= maxTicks) { stepMonths = step; break; }
+      }
+      const m = new Date(tMin);
+      m.setDate(1);
+      m.setHours(0, 0, 0, 0);
+      if (m.getTime() < tMin) m.setMonth(m.getMonth() + 1);
+      for (; m.getTime() <= tMax; m.setMonth(m.getMonth() + stepMonths)) {
+        ticks.push({ time: m.getTime(), major: true, label: m.toLocaleString(undefined, { month: 'short' }) });
+      }
+      return ticks;
+    }
+
+    const stepHours = hourTickStep(rangeHours, plotW);
+    const dayStart = new Date(tMin);
+    dayStart.setHours(0, 0, 0, 0);
+    const tick = new Date(dayStart);
+    while (tick.getTime() < tMin) tick.setHours(tick.getHours() + stepHours);
+    for (; tick.getTime() <= tMax; tick.setHours(tick.getHours() + stepHours)) {
+      const isMidnight = tick.getHours() === 0;
+      const label = (stepHours >= 24 || isMidnight) ? tick.toLocaleString(undefined, { month: 'short', day: 'numeric' }) : String(tick.getHours()).padStart(2, '0');
+      ticks.push({ time: tick.getTime(), major: isMidnight, label });
+    }
+    return ticks;
+  }
+
   // -- Temperature / humidity charts — one axis each (no dual-axis), shared
   //    time domain, linked crosshair. ------------------------------------------
   function drawChart(svgId, valueKey, unit, H) {
@@ -766,17 +830,10 @@
       svg.appendChild(makeEl('text', { x: marginLeft - 8, y: y(v) + 4, 'text-anchor': 'end', 'font-size': 10 })).textContent = isTemp ? v.toFixed(0) + '°' : v.toFixed(0) + unit;
     }
 
-    const rangeHours = (tMax - tMin) / 3600000;
-    const stepHours = hourTickStep(rangeHours, plotW);
-    const tick = new Date(tMin);
-    tick.setMinutes(0, 0, 0);
-    if (tick.getTime() < tMin) tick.setHours(tick.getHours() + 1);
-    for (; tick.getTime() <= tMax; tick.setHours(tick.getHours() + stepHours)) {
-      const xPos = x(tick.getTime());
-      const isMidnight = tick.getHours() === 0;
-      svg.appendChild(makeEl('line', { x1: xPos, x2: xPos, y1: marginTop, y2: H - marginBottom, stroke: gridColor(), 'stroke-opacity': isMidnight ? 0.3 : 0.1, 'stroke-width': 1 }));
-      const label = (stepHours >= 24 || isMidnight) ? tick.toLocaleString(undefined, { month: 'short', day: 'numeric' }) : String(tick.getHours()).padStart(2, '0');
-      svg.appendChild(makeEl('text', { x: xPos, y: H - 8, 'text-anchor': 'middle', 'font-size': 10 })).textContent = label;
+    for (const t of timeAxisTicks(tMin, tMax, plotW)) {
+      const xPos = x(t.time);
+      svg.appendChild(makeEl('line', { x1: xPos, x2: xPos, y1: marginTop, y2: H - marginBottom, stroke: gridColor(), 'stroke-opacity': t.major ? 0.3 : 0.1, 'stroke-width': 1 }));
+      svg.appendChild(makeEl('text', { x: xPos, y: H - 8, 'text-anchor': 'middle', 'font-size': 10 })).textContent = t.label;
     }
 
     for (const { sensor, points } of perSensor) {
@@ -943,16 +1000,10 @@
 
     // Vertical gridlines + time labels - same stepping logic as the Overview charts
     const rangeHours = (tMax - tMin) / 3600000;
-    const stepHours = hourTickStep(rangeHours, plotW);
-    const tick = new Date(tMin);
-    tick.setMinutes(0, 0, 0);
-    if (tick.getTime() < tMin) tick.setHours(tick.getHours() + 1);
-    for (; tick.getTime() <= tMax; tick.setHours(tick.getHours() + stepHours)) {
-      const xPos = x(tick.getTime());
-      const isMidnight = tick.getHours() === 0;
-      svg.appendChild(makeEl('line', { x1: xPos, x2: xPos, y1: marginTop, y2: H - marginBottom, stroke: gridColor(), 'stroke-opacity': isMidnight ? 0.3 : 0.1, 'stroke-width': 1 }));
-      const label = (stepHours >= 24 || isMidnight) ? tick.toLocaleString(undefined, { month: 'short', day: 'numeric' }) : String(tick.getHours()).padStart(2, '0');
-      svg.appendChild(makeEl('text', { x: xPos, y: H - 8, 'text-anchor': 'middle', 'font-size': 10 })).textContent = label;
+    for (const t of timeAxisTicks(tMin, tMax, plotW)) {
+      const xPos = x(t.time);
+      svg.appendChild(makeEl('line', { x1: xPos, x2: xPos, y1: marginTop, y2: H - marginBottom, stroke: gridColor(), 'stroke-opacity': t.major ? 0.3 : 0.1, 'stroke-width': 1 }));
+      svg.appendChild(makeEl('text', { x: xPos, y: H - 8, 'text-anchor': 'middle', 'font-size': 10 })).textContent = t.label;
     }
 
     // Y-axis labels - temperature (right, alongside its gridlines)
