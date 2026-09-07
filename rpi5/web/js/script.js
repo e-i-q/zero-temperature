@@ -262,8 +262,9 @@
   }
 
   // Builds one empty .chart-card for a forecast target — same markup as the
-  // Overview tab's chart cards (corners, chart-head, chart-wrap>svg), plus
-  // a small per-card chart-foot for its own hour count/cache freshness.
+  // Overview tab's chart cards (corners, chart-head, chart-wrap>svg). No
+  // per-card footer — the hour-count/"Queried" line that used to live there
+  // just ate vertical space the chart itself should have, so it's gone.
   // Built via createElement/textContent throughout (never innerHTML with
   // interpolated text) since a place's `name` came from api/geocode.php,
   // i.e. text this dashboard didn't author.
@@ -290,16 +291,7 @@
     const svg = makeEl('svg', { viewBox: '0 0 1000 240', preserveAspectRatio: 'none' });
     wrap.appendChild(svg);
 
-    const foot = document.createElement('div');
-    foot.className = 'chart-foot';
-    const count = document.createElement('span');
-    count.className = 'forecast-card-count';
-    count.textContent = '—';
-    const generated = document.createElement('span');
-    generated.className = 'forecast-card-generated';
-    foot.append(count, generated);
-
-    section.append(head, wrap, foot);
+    section.append(head, wrap);
     return section;
   }
 
@@ -335,9 +327,6 @@
         : payload.clamped
           ? `shaded bands = approx. night (20:00–06:00) · bars = hourly rain/snow · Open-Meteo only forecasts ${payload.forecast_days_max} days ahead — showing the max available`
           : 'shaded bands = approx. night (20:00–06:00) · bars = hourly rain/snow';
-      card.querySelector('.forecast-card-count').textContent =
-        payload ? payload.count + ' forecast hour' + (payload.count === 1 ? '' : 's') : '—';
-      card.querySelector('.forecast-card-generated').textContent = payload ? 'Queried ' + fmtTime(payload.generated_at) : '';
     });
   }
 

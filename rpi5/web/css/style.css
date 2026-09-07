@@ -88,7 +88,7 @@ body {
 }
 
 .page {
-  max-width: 1180px;
+  max-width: 80%;
   margin: 0 auto;
   padding: 32px 24px 72px;
 }
@@ -763,21 +763,6 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
    script.js. Just a plain block; .chart-card's own margin-bottom already
    stacks the cards. */
 .forecast-cards { display: block; }
-
-/* Small per-card meta line (forecast hour count + cache freshness) — like
-   <footer>, but scoped inside a card instead of the whole tab, since every
-   place has its own count/timestamp. */
-.chart-foot {
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px solid var(--color-divider);
-  font: 400 10px var(--font-mono);
-  color: var(--color-text-muted);
-  display: flex;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 6px;
-}
 
 svg text { font-family: var(--font-mono); fill: var(--color-text-muted); }
 
