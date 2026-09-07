@@ -683,7 +683,13 @@
 
   function hourTickStep(rangeHours, plotW) {
     for (const step of HOUR_STEPS) {
-      const labelWidthPx = step >= 24 ? 54 : 14;
+      // Midnight ticks always render as a full date label ("Sep 7"), not an
+      // hour, regardless of step (see the label logic where stepHours is
+      // used) - so once the visible range can span more than a day, every
+      // tick needs to clear that wider width, or the date label merges into
+      // its hour-labeled neighbors. A 2-day range is the first place this
+      // bites: it's dense enough to otherwise pick an hourly step.
+      const labelWidthPx = (step >= 24 || rangeHours > 24) ? 54 : 14;
       const maxTicks = Math.max(2, Math.floor(plotW / labelWidthPx));
       if (rangeHours / step <= maxTicks) return step;
     }
@@ -873,8 +879,11 @@
   function drawForecastChart(svg, data) {
     svg.innerHTML = '';
     const W = 1000, H = 240;
-    // Extra top margin makes room for the condition-icon strip.
-    const marginLeft = 46, marginRight = 46, marginTop = 40, marginBottom = 28;
+    // Extra top margin makes room for the condition-icon strip. Extra right
+    // margin (vs. the left) makes room for two label columns sharing that
+    // edge - temperature degrees and wind speed - now that wind's carries
+    // its "km/h" unit instead of a bare number.
+    const marginLeft = 46, marginRight = 76, marginTop = 40, marginBottom = 28;
     const plotW = W - marginLeft - marginRight;
     const plotH = H - marginTop - marginBottom;
     svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
@@ -895,10 +904,22 @@
     const snows = data.map((r) => r.snowfall_cm || 0);
 
     const tMin = times[0], tMax = times[times.length - 1];
-    const tempMin = Math.floor(Math.min(...temps) - 1);
-    const tempMax = Math.ceil(Math.max(...temps) + 1);
+    // Pad top and bottom by a fraction of the data's own range (with a small
+    // floor) rather than a flat 1° - a flat degree barely registers once the
+    // forecast spans a wide temperature range, leaving the peak/trough line
+    // and its day high/low label looking squished against the plot's edge.
+    const tempSpan = Math.max(...temps) - Math.min(...temps) || 1;
+    const tempPad = Math.max(2, tempSpan * 0.12);
+    const tempMin = Math.floor(Math.min(...temps) - tempPad);
+    const tempMax = Math.ceil(Math.max(...temps) + tempPad);
     const humMin = 0, humMax = 100; // full physical range, same convention as the Overview humidity chart
     const windMin = 0, windMax = Math.max(5, Math.ceil(Math.max(...winds) + 2));
+    // One gridline/label per whole degree reads fine over a single day but
+    // packs together into an unreadable smear once the forecast spans a wide
+    // range (a multi-day view easily covers 15-20°) - step so there are
+    // about 4-5 lines regardless of range, same approach as the Overview
+    // charts' vStep.
+    const tempStep = Math.max(1, Math.round((tempMax - tempMin) / 4));
 
     const x = (t) => marginLeft + ((t - tMin) / (tMax - tMin || 1)) * plotW;
     const yTemp = (v) => marginTop + plotH - ((v - tempMin) / (tempMax - tempMin || 1)) * plotH;
@@ -915,8 +936,8 @@
       svg.appendChild(makeEl('rect', { x: x(a), y: marginTop, width: Math.max(0, x(b) - x(a)), height: plotH, fill: gridColor(), 'fill-opacity': 0.05 }));
     }
 
-    // Horizontal gridlines - one per degree C
-    for (let v = Math.ceil(tempMin); v <= Math.floor(tempMax); v++) {
+    // Horizontal gridlines - one per tempStep degrees
+    for (let v = Math.ceil(tempMin / tempStep) * tempStep; v <= tempMax; v += tempStep) {
       svg.appendChild(makeEl('line', { x1: marginLeft, x2: W - marginRight, y1: yTemp(v), y2: yTemp(v), stroke: gridColor(), 'stroke-opacity': 0.1, 'stroke-width': 1 }));
     }
 
@@ -934,8 +955,8 @@
       svg.appendChild(makeEl('text', { x: xPos, y: H - 8, 'text-anchor': 'middle', 'font-size': 10 })).textContent = label;
     }
 
-    // Y-axis labels - temperature (right, one per whole degree alongside its gridlines)
-    for (let v = Math.ceil(tempMin); v <= Math.floor(tempMax); v++) {
+    // Y-axis labels - temperature (right, alongside its gridlines)
+    for (let v = Math.ceil(tempMin / tempStep) * tempStep; v <= tempMax; v += tempStep) {
       svg.appendChild(makeEl('text', { x: W - marginRight + 8, y: yTemp(v) + 4, 'text-anchor': 'start', 'font-size': 10, fill: tempColor })).textContent = v.toFixed(0) + '°';
     }
 
@@ -943,7 +964,7 @@
     for (let i = 0; i <= 4; i++) {
       const v = windMin + ((windMax - windMin) / 4) * (4 - i);
       const y = marginTop + (plotH / 4) * i;
-      svg.appendChild(makeEl('text', { x: W - 4, y: y + 4, 'text-anchor': 'end', 'font-size': 9, fill: windColor })).textContent = v.toFixed(0);
+      svg.appendChild(makeEl('text', { x: W - 4, y: y + 4, 'text-anchor': 'end', 'font-size': 9, fill: windColor })).textContent = v.toFixed(0) + ' km/h';
     }
 
     // Y-axis labels - humidity (left)
@@ -1009,8 +1030,8 @@
     // Daily high/low temperature labels - one pair per calendar day covered
     // by the forecast, printed at that day's peak/trough on the temp line
     // (the usual weather-app convention). tempMin/tempMax already pad the
-    // axis by 1 degree beyond the data's own extremes, so the labels never
-    // collide with the icon strip above or the time-axis labels below.
+    // axis beyond the data's own extremes, so the labels never collide with
+    // the icon strip above or the time-axis labels below.
     // Horizontally, though, a day's extreme can land right on the series'
     // first/last point - i.e. at the plot's left/right edge, straight under
     // the temperature axis's own per-degree tick labels - so anchor from the

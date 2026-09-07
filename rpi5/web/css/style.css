@@ -781,6 +781,14 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
 
 svg text { font-family: var(--font-mono); fill: var(--color-text-muted); }
 
+/* Weather condition icons (see pickWeatherIcon() in script.js) are plain
+   black glyphs on a transparent background, drawn for a light chart
+   surface — invert them in the dark theme so they read as light strokes
+   instead of near-invisible black-on-dark-gray. Inverting a monochrome
+   black icon yields pure white; alpha is untouched, so transparency still
+   shows the chart behind it. */
+:root[data-theme="dark"] .weather-icon { filter: invert(1); }
+
 /* -- Tooltip / crosshair ----------------------------------------------------- */
 /* Fixed dark surface in both themes (not var(--color-text)/(--color-bg),
    which would flip with the theme and leave the hardcoded #fff children
