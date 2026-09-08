@@ -805,6 +805,12 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
 .leaflet-container { background: var(--color-surface); font-family: var(--font-body); }
 .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--color-bg); color: var(--color-text); }
 .leaflet-control-attribution { background: var(--color-bg) !important; color: var(--color-text-muted) !important; }
+/* Desaturates/lightens the OSM basemap (see initWeatherMap()'s className:
+   'basemap-muted') so the faint OWM cloud/wind overlays above it actually
+   stand out, without depending on a third-party "pre-muted" tile provider
+   that might (like CartoDB's free Positron tiles did) start requiring its
+   own API key later. */
+.basemap-muted { filter: grayscale(55%) brightness(1.1) contrast(0.9); }
 .leaflet-control-attribution a { color: var(--color-text-soft) !important; }
 /* Thunderstorm marker glyph (see renderThunderMarkers() in script.js) — a
    plain emoji divIcon rather than a custom image asset. */

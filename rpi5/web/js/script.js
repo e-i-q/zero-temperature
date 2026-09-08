@@ -974,14 +974,16 @@
 
   async function initWeatherMap() {
     weatherMap = L.map('weather-map').setView(CZ_CENTER, CZ_ZOOM);
-    // A muted, low-saturation basemap (not standard OSM's bright greens/
-    // yellows) so the faint white/pale OWM overlays above actually show up
-    // against it instead of blending into busy terrain colors — the same
-    // reason weather-map sites generally pick a plain basemap for this.
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-      subdomains: 'abcd',
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    // Plain OSM tiles (no key needed), muted client-side via the
+    // .basemap-muted CSS filter (see style.css) so the faint white/pale OWM
+    // overlays above actually show up against it instead of blending into
+    // busy terrain colors. An earlier version of this pointed at CartoDB's
+    // Positron tiles for the same muted look, but CARTO started requiring
+    // its own API key on that free raster endpoint — not worth a second
+    // key just to desaturate a basemap when a CSS filter does the same job.
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      className: 'basemap-muted',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(weatherMap);
 
     thunderMarkers = L.layerGroup();
