@@ -792,6 +792,24 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
    stacks the cards. */
 .forecast-cards { display: block; }
 
+/* -- Weather map (Forecast tab) — see initWeatherMap() in script.js -------- */
+#map-legend { margin-top: 6px; }
+.map-wrap { margin-top: 8px; }
+#weather-map {
+  height: 420px;
+  border: 1px solid var(--color-divider);
+}
+/* Leaflet's own chrome (popups, attribution) defaults to a plain white
+   widget look — retint it to the dashboard's own surface/text tokens so it
+   doesn't stand out as a foreign embed, in either theme. */
+.leaflet-container { background: var(--color-surface); font-family: var(--font-body); }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--color-bg); color: var(--color-text); }
+.leaflet-control-attribution { background: var(--color-bg) !important; color: var(--color-text-muted) !important; }
+.leaflet-control-attribution a { color: var(--color-text-soft) !important; }
+/* Thunderstorm marker glyph (see renderThunderMarkers() in script.js) — a
+   plain emoji divIcon rather than a custom image asset. */
+.thunder-icon { font-size: 18px; line-height: 1; text-align: center; filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.7)); }
+
 svg text { font-family: var(--font-mono); fill: var(--color-text-muted); }
 
 /* Weather condition icons (see pickWeatherIcon() in script.js) are plain

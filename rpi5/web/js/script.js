@@ -6,8 +6,13 @@
   const SETTINGS_URL = 'api/settings.php';
   const SYNC_TRIGGER_URL = 'api/sync_trigger.php';
   const DEPLOY_TRIGGER_URL = 'api/deploy_trigger.php';
+  const WEATHERMAP_URL = 'api/weathermap.php';
   const REFRESH_MS = 60000; // poll for new data every minute
   const FORECAST_REFRESH_MS = REFRESH_MS * 5; // forecast.php itself caches Open-Meteo for 30min
+  // Geographic centroid of the Czech Republic and a zoom that fits the
+  // whole country in #weather-map's default size — see initWeatherMap().
+  const CZ_CENTER = [49.8175, 15.4730];
+  const CZ_ZOOM = 7;
   const RANGE_STORAGE_KEY = 'hiveRange';
   const FORECAST_RANGE_STORAGE_KEY = 'hiveForecastRange';
   // The fixed chip set for logged-out visitors (and brand-new profiles) —
@@ -55,6 +60,18 @@
   // loadForecast()/renderForecastCards().
   let forecastData = {};
   let forecastLoaded = false; // loaded lazily, the first time the Forecast tab is opened
+
+  // Weather map (Forecast tab) — Leaflet instance and its OpenWeatherMap
+  // overlay layers, built lazily alongside forecastLoaded above. See
+  // initWeatherMap()/loadThunderMarkers().
+  let weatherMapLoaded = false;
+  let weatherMap = null;
+  let owmLayers = {};        // { clouds, rain, wind } -> L.tileLayer, added/removed as the legend is toggled
+  let thunderMarkers = null; // L.layerGroup of thunderstorm markers, rebuilt on every loadThunderMarkers()
+  // Which overlays start on — Clouds/Wind off by default so the map isn't
+  // too busy at first glance; Rain and Thunderstorms are the two most
+  // actionable at a glance, so those start visible.
+  const mapLayerDefaults = { clouds: false, rain: true, wind: false, thunder: true };
 
   // This profile's saved forecast locations (Settings tab's Forecast
   // section) — settings.php's `places`, see its docstring and
@@ -894,6 +911,83 @@
       const d = pts.map((p, i) => (i === 0 ? 'M' : 'L') + x(new Date(p.day + 'T00:00:00').getTime()).toFixed(1) + ',' + y(p.temp_avg).toFixed(1)).join(' ');
       svg.appendChild(makeEl('path', { d, fill: 'none', stroke: color, 'stroke-width': 1.75, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
     }
+  }
+
+  // -- Weather map (Forecast tab) — Leaflet + OpenWeatherMap tile overlays
+  //    (clouds/rain/wind) plus a thunderstorm-marker layer, centered on the
+  //    Czech Republic. Built lazily the first time the Forecast tab opens
+  //    (initWeatherMap(), wired up alongside loadForecast() in the tabs
+  //    click handler below), same "don't cost anything until the tab is
+  //    actually visited" rule forecastLoaded already follows. OWM's own
+  //    free tile tier has no dedicated thunderstorm layer (see
+  //    api/weathermap.php's docstring) — that's why thunderstorms are
+  //    markers, sourced from api/weathermap.php?action=thunder, instead of
+  //    a fourth tile overlay like the other three. -----------------------
+
+  const OWM_TILE_LAYERS = {
+    clouds: 'clouds_new',
+    rain: 'precipitation_new',
+    wind: 'wind_new',
+  };
+
+  function owmTileLayer(layerCode, appid) {
+    return L.tileLayer(`https://tile.openweathermap.org/map/${layerCode}/{z}/{x}/{y}.png?appid=${appid}`, {
+      opacity: 0.7,
+      attribution: '&copy; <a href="https://openweathermap.org/">OpenWeatherMap</a>',
+    });
+  }
+
+  // Renders api/weathermap.php?action=thunder's points as ⚡ markers,
+  // replacing whatever thunderMarkers already held — called once on
+  // initWeatherMap() and then on the same FORECAST_REFRESH_MS cadence as
+  // loadForecast(), since both endpoints share forecast.php's 30-minute
+  // upstream cache window.
+  async function loadThunderMarkers() {
+    if (!thunderMarkers) return; // initWeatherMap() hasn't finished setting up yet
+    let points = [];
+    try {
+      const payload = await fetchJson(`${WEATHERMAP_URL}?action=thunder`);
+      points = payload.points || [];
+    } catch (err) {
+      console.error('Failed to load thunderstorm markers:', err.message);
+      return; // keep whatever markers are already on the map rather than clearing them on a transient failure
+    }
+    thunderMarkers.clearLayers();
+    points.forEach((p) => {
+      const icon = L.divIcon({ className: 'thunder-icon', html: '⚡', iconSize: [18, 18] });
+      L.marker([p.latitude, p.longitude], { icon })
+        .bindPopup(`<strong>${p.name}</strong><br>${p.description}`)
+        .addTo(thunderMarkers);
+    });
+  }
+
+  async function initWeatherMap() {
+    weatherMap = L.map('weather-map').setView(CZ_CENTER, CZ_ZOOM);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    }).addTo(weatherMap);
+
+    thunderMarkers = L.layerGroup();
+    if (mapLayerDefaults.thunder) thunderMarkers.addTo(weatherMap);
+
+    // #weather-map has a real size by now (the Forecast panel was just
+    // unhidden, synchronously, by the tabs click handler below) — this
+    // just guards against a stale size if the window was resized while
+    // the panel was hidden.
+    weatherMap.invalidateSize();
+
+    try {
+      const { appid } = await fetchJson(`${WEATHERMAP_URL}?action=tiles`);
+      Object.entries(OWM_TILE_LAYERS).forEach(([key, layerCode]) => {
+        const layer = owmTileLayer(layerCode, appid);
+        owmLayers[key] = layer;
+        if (mapLayerDefaults[key]) layer.addTo(weatherMap);
+      });
+    } catch (err) {
+      console.error('Failed to load weather map tiles:', err.message);
+    }
+
+    loadThunderMarkers();
   }
 
   // -- Forecast tab — Open-Meteo hourly forecast for Brno (temperature,
@@ -2036,6 +2130,31 @@
       loadForecast();
       setInterval(loadForecast, FORECAST_REFRESH_MS);
     }
+    if (tab === 'forecast' && !weatherMapLoaded) {
+      weatherMapLoaded = true;
+      initWeatherMap();
+      setInterval(loadThunderMarkers, FORECAST_REFRESH_MS);
+    } else if (tab === 'forecast' && weatherMap) {
+      weatherMap.invalidateSize(); // guard against a resize while this tab was hidden
+    }
+  });
+
+  // Weather map legend doubles as the layer toggle — clicking a swatch
+  // shows/hides that overlay, dimming the label the same way the Overview
+  // tab's per-sensor legend dims a hidden series (see renderLegend()).
+  el('map-legend').addEventListener('click', (e) => {
+    const btn = e.target.closest('.legend-item');
+    if (!btn) return;
+    const key = btn.dataset.layer;
+    const layer = key === 'thunder' ? thunderMarkers : owmLayers[key];
+    if (!layer || !weatherMap) return; // still loading — nothing to toggle yet
+    const showing = weatherMap.hasLayer(layer);
+    if (showing) {
+      weatherMap.removeLayer(layer);
+    } else {
+      layer.addTo(weatherMap);
+    }
+    btn.classList.toggle('dim', showing);
   });
 
   attachCrosshair('chart-temp');

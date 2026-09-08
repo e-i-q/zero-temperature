@@ -1,0 +1,8 @@
+# Secrets that must never reach GitHub. Every other secret in this project
+# (web_reader's DB password, the sync/deploy-webhook tokens, ...) is
+# provisioned straight onto the target Pi by a setup/ script instead of
+# living in the repo at all — see rpi5/setup/setup_weathermap.sh and its
+# sibling setup_sync_trigger.sh/setup_deploy_webhook.sh. This file is meant
+# as a backstop for a key dropped locally ahead of that setup step, not a
+# sanctioned second place for secrets to live.
+rpi5/apikey/

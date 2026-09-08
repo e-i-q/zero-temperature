@@ -30,6 +30,7 @@ PostgreSQL (Hive, this Pi)  →  api/readings.php, api/daily.php  →  dashboard
 | `web/api/readings.php` | JSON API: every sensor's readings in a requested time window, plus latest/min/avg/max per sensor |
 | `web/api/daily.php` | JSON API: 12 months of daily mean/min/max temperature per sensor, aggregated in PostgreSQL |
 | `web/api/forecast.php` | JSON API: Open-Meteo hourly forecast (temperature/humidity/wind/condition) for the Forecast tab. No database — a cached proxy, same pattern as `../rpi-zero/web/weather.php` |
+| `web/api/weathermap.php` | JSON API backing the Forecast tab's weather map: OpenWeatherMap tile-layer config plus cached thunderstorm-marker points. See its docstring and "Weather map" below |
 | `web/api/settings.php` | JSON API backing the Settings tab: password-profile login/create/save/logout, session-cookie-backed. See its docstring |
 | `web/api/sync_trigger.php` | JSON API backing the Settings tab's "Sync Now" buttons: relays a manual backlog-sync request to a specific Pi Zero's `web/sync.php`. See its docstring |
 | `web/api/deploy_trigger.php` | JSON API backing the Settings tab's "Update Now" buttons: relays a manual pull+redeploy request to a specific Pi Zero's `web/deploy_trigger.php`. See its docstring |
@@ -39,6 +40,7 @@ PostgreSQL (Hive, this Pi)  →  api/readings.php, api/daily.php  →  dashboard
 | `setup/deploy_web.sh` | Syncs `web/` into the nginx web root |
 | `setup/git_deploy.sh` | Pulls the latest `main` and re-runs `deploy_web.sh` — what `deploy_webhook.php` actually runs |
 | `setup/setup_sync_trigger.sh` | Provisions the shared secret used to authenticate `sync_trigger.php`'s requests to each Pi Zero |
+| `setup/setup_weathermap.sh` | Provisions the OpenWeatherMap API key `weathermap.php` uses for the Forecast tab's weather map — see "Weather map" below |
 | `setup/setup_deploy_webhook.sh` | Provisions push-to-deploy: the GitHub webhook secret, the fleet-wide deploy token, and the sudo rule `deploy_webhook.php` needs to redeploy as root |
 | `setup/setup_sensor_pinger.sh` | Installs `bin/ping_sensors.php` as a once-a-minute cron job and provisions its `sensor_pinger` DB credentials — see "Sensor liveness pinger" below |
 | `setup/lib/log.sh` | Shared colored logging + quiet-by-default install output for the scripts above |
@@ -224,6 +226,21 @@ waiting for the next push.
   columns, from the same `ups_ina219.py` run as `sensors.status` (see
   "UPS battery status" above). A sensor with no UPS HAT just omits this
   field entirely, same as the power badge.
+- **Weather map**: the Forecast tab also shows a live weather map (Leaflet +
+  OpenStreetMap base tiles) centered on the Czech Republic, with four
+  toggleable overlays — Clouds, Rain and Wind are OpenWeatherMap's raster
+  tile layers (`clouds_new`/`precipitation_new`/`wind_new`); Thunderstorms
+  is a marker layer instead, since OpenWeatherMap's free tile tier has no
+  dedicated thunderstorm layer at any subscription level — `weathermap.php`
+  samples current conditions at a fixed spread of Czech towns and flags
+  whichever ones report a thunderstorm right now (weather-condition id
+  2xx), cached 30 minutes like `forecast.php`. Needs an OpenWeatherMap API
+  key: get a free one at <https://home.openweathermap.org/api_keys> and run
+  `sudo OWM_API_KEY=<key> bash setup/setup_weathermap.sh` — see that
+  script's docstring for why the key is provisioned this way (outside the
+  repo, outside the nginx web root) instead of living in `web/` itself.
+  Without it, the map's tile/marker requests fail with a clear "not
+  configured" error rather than silently showing a blank map.
 - **Forecast tab**: `forecast.php` reuses the Overview tab's range-chip UI
   (12H/24H/2D/5D/1M/ALL) so both tabs feel the same, but it's inherently a
   forward-looking window — Open-Meteo's free `/v1/forecast` endpoint only
