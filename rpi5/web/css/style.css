@@ -48,14 +48,25 @@
   --status-battery-text: #c1861f;
   --status-charging-text: #2a78d6;
 
-  /* -- Forecast tab accents — same light-theme values as rpi-zero's
-        weather chart (../rpi-zero/web/css/style.css), kept separate from
-        --series-* since they label fixed metrics (temp/humidity/wind),
-        not a cycled per-sensor palette. -------------------------------- */
-  --temp: #c1502e;
-  --humidity: #3a5a78;
-  --wind: #4c8a5e;
-  --rain: #2a78d6;
+  /* -- Forecast tab accents — literal copies of --series-1/2/3/6 (see
+        above), not var() references to them, so cssVar()'s single-level
+        getPropertyValue() lookup (js/script.js) resolves them to an
+        actual color instead of the literal string "var(--series-2)" —
+        custom properties don't get nested var()s substituted the way a
+        real property like `color` would. Each metric borrows one of
+        those hues so its line reads with the same vividness as the
+        Overview charts, instead of the muted earth tones this used to
+        hardcode (previously #c1502e/#3a5a78/#4c8a5e — same light-theme
+        values as rpi-zero's weather chart, ../rpi-zero/web/css/style.css,
+        which still uses them). Picked to avoid colliding with --rain,
+        which already reused --series-1's blue for its bars. No
+        dark-theme override needed, same as --series-* itself: these hues
+        are already validated to read fine on both the light and dark
+        --color-bg. -------------------------------------------------- */
+  --temp: #eb6834;     /* = --series-2, orange */
+  --humidity: #1baf7a; /* = --series-3, aqua */
+  --wind: #008300;     /* = --series-6, green */
+  --rain: #2a78d6;     /* = --series-1, blue (unchanged) */
   --snow: #9fb8c9;
 }
 
