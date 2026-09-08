@@ -600,6 +600,23 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
 .places-item-btn:disabled { opacity: 0.5; cursor: default; }
 .places-item-btn.remove:hover:not(:disabled) { border-color: var(--series-8); color: var(--series-8); }
 
+/* Up/down reorder buttons — compact icon squares, matching .ranges-item-btn. */
+.places-item-move-btn {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--color-divider-strong);
+  background: none;
+  color: var(--color-text-soft);
+  cursor: pointer;
+  flex: none;
+}
+.places-item-move-btn:hover:not(:disabled) { background: var(--color-surface); color: var(--color-text); }
+.places-item-move-btn:disabled { opacity: 0.3; cursor: default; }
+
 .places-results {
   list-style: none;
   margin: 10px 0 0;

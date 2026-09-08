@@ -1550,8 +1550,9 @@
   // section below lists. See forecastPlaces/forecastTargets() above and
   // applyRangesFromSettings(), which is what actually keeps this list in
   // sync with the server after every mutation here. The Forecast tab plots
-  // every row shown here (or a single default "Brno" card when there are
-  // none) — there's no "active" place to pick, just what to add/remove.
+  // every row shown here, in this same order (or a single default "Brno"
+  // card when there are none) — there's no "active" place to pick, just
+  // what to add/remove/reorder.
   function renderPlacesList() {
     const list = el('places-list');
     if (!list) return;
@@ -1564,7 +1565,7 @@
       list.appendChild(li);
       return;
     }
-    forecastPlaces.forEach((p) => {
+    forecastPlaces.forEach((p, i) => {
       const li = document.createElement('li');
       li.className = 'places-item';
 
@@ -1576,14 +1577,33 @@
       coords.className = 'places-item-coords';
       coords.textContent = `${p.latitude.toFixed(2)}, ${p.longitude.toFixed(2)}`;
 
+      const up = document.createElement('button');
+      up.type = 'button';
+      up.className = 'places-item-move-btn';
+      up.dataset.action = 'up';
+      up.dataset.index = String(i);
+      up.disabled = i === 0;
+      up.title = 'Move up';
+      up.textContent = '▲';
+
+      const down = document.createElement('button');
+      down.type = 'button';
+      down.className = 'places-item-move-btn';
+      down.dataset.action = 'down';
+      down.dataset.index = String(i);
+      down.disabled = i === forecastPlaces.length - 1;
+      down.title = 'Move down';
+      down.textContent = '▼';
+
       const remove = document.createElement('button');
       remove.type = 'button';
       remove.className = 'places-item-btn remove';
+      remove.dataset.action = 'remove';
       remove.dataset.id = String(p.id);
       remove.title = 'Remove';
       remove.textContent = '✕';
 
-      li.append(name, coords, remove);
+      li.append(name, coords, up, down, remove);
       list.appendChild(li);
     });
   }
@@ -1594,9 +1614,10 @@
     box.hidden = false;
   }
 
-  // Applies the fresh `settings` a places mutation (add/remove) handed
-  // back, then reloads the Forecast tab if it's ever been opened — the set
-  // of places (and so which cards are shown) just changed.
+  // Applies the fresh `settings` a places mutation (add/remove/reorder)
+  // handed back, then reloads the Forecast tab if it's ever been opened —
+  // the set or order of places (and so which cards are shown, in what
+  // order) just changed.
   function applyPlacesResult(payload) {
     el('places-error').hidden = true;
     applyRangesFromSettings(payload.settings);
@@ -1622,9 +1643,33 @@
     }
   }
 
+  // Posts the full reordered id list, same "whole list every time" shape
+  // as saveRanges() above — settings.php rejects anything that isn't
+  // exactly this profile's current ids, just reordered.
+  async function reorderPlaces(newOrder) {
+    try {
+      applyPlacesResult(await postSettings('reorder_places', { ids: newOrder.map((p) => p.id) }));
+    } catch (err) {
+      placesError(err.message);
+    }
+  }
+
   el('places-list').addEventListener('click', (e) => {
-    const btn = e.target.closest('.places-item-btn');
+    const btn = e.target.closest('.places-item-btn, .places-item-move-btn');
     if (!btn || btn.disabled) return;
+    if (btn.dataset.action === 'up' || btn.dataset.action === 'down') {
+      const i = Number(btn.dataset.index);
+      const next = forecastPlaces.slice();
+      if (btn.dataset.action === 'up' && i > 0) {
+        [next[i - 1], next[i]] = [next[i], next[i - 1]];
+      } else if (btn.dataset.action === 'down' && i < next.length - 1) {
+        [next[i], next[i + 1]] = [next[i + 1], next[i]];
+      } else {
+        return;
+      }
+      reorderPlaces(next);
+      return;
+    }
     removePlace(Number(btn.dataset.id));
   });
 

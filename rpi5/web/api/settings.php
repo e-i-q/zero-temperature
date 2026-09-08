@@ -80,14 +80,21 @@
  *   {"action": "save_sensor_label", "sensor": "dht22-01", "label": "Kitchen"}
  *   {"action": "add_place", "name": "Brno, South Moravian Region, Czechia", "latitude": 49.19522, "longitude": 16.60796}
  *   {"action": "remove_place", "id": 3}
+ *   {"action": "reorder_places", "ids": [5, 3, 7]}
  *   {"action": "logout"}
  *
- * `add_place`/`remove_place` manage the logged-in profile's
- * `forecast_places` rows — see the docstring above and
+ * `add_place`/`remove_place`/`reorder_places` manage the logged-in
+ * profile's `forecast_places` rows — see the docstring above and
  * ../../../../db/database/sensors/tables/forecast_places.md. `add_place`
  * takes whatever a api/geocode.php search result handed the client
  * (`name`/`latitude`/`longitude`) rather than a free-typed name, so every
  * saved place is something Open-Meteo can actually forecast for.
+ * `reorder_places` takes the full list of this profile's place ids in the
+ * new display order (the Settings tab's up/down buttons send its whole
+ * list every time, same as `save_ranges` does for chips) and rewrites
+ * every row's `position` to match — it's rejected if the id set doesn't
+ * exactly match what this profile currently owns, so it can only reorder,
+ * never add or remove a row.
  *
  * `save_sensor_label` sets one entry of the logged-in profile's own
  * `settings.sensor_labels` map (see
@@ -177,13 +184,14 @@ function encodeLabels(array $labels): string {
     return implode(',', $parts);
 }
 
-// This profile's saved forecast_places rows, oldest first (insertion order
-// doubles as display order — there's no separate position column, unlike
-// `ranges`, since reordering a handful of places wasn't worth the extra
-// UI). Each entry's `latitude`/`longitude` come back as PHP floats (PDO
-// hands back PostgreSQL `real` as numeric strings otherwise).
+// This profile's saved forecast_places rows in display order: `position`
+// (set by `reorder_places`, and assigned to new rows by `add_place`) with
+// ties/NULLs falling back to `id` (insertion order) — the same order a
+// row would have had before `position` existed. Each entry's
+// `latitude`/`longitude` come back as PHP floats (PDO hands back
+// PostgreSQL `real` as numeric strings otherwise).
 function fetchPlaces(PDO $pdo, int $passwordId): array {
-    $stmt = $pdo->prepare('SELECT id, name, latitude, longitude FROM forecast_places WHERE password_id = :id ORDER BY id');
+    $stmt = $pdo->prepare('SELECT id, name, latitude, longitude FROM forecast_places WHERE password_id = :id ORDER BY position IS NULL, position, id');
     $stmt->bindValue(':id', $passwordId, PDO::PARAM_INT);
     $stmt->execute();
     $places = [];
@@ -477,8 +485,20 @@ switch ($action) {
             fail(400, 'At most ' . MAX_PLACES . ' places are allowed — remove one first.');
         }
 
+        // A new row always belongs at the end. If this profile has never
+        // reordered (every existing row's `position` is still NULL),
+        // fetchPlaces()'s id fallback already puts the new (higher-id) row
+        // last, so NULL is correct here too. Once at least one row has a
+        // `position`, that path is only consulted for the NULL leftovers,
+        // so the new row needs an explicit position past the current max
+        // to land at the end rather than back among them.
+        $maxPosStmt = $pdo->prepare('SELECT MAX(position) FROM forecast_places WHERE password_id = :pid');
+        $maxPosStmt->execute(['pid' => $passwordId]);
+        $maxPos = $maxPosStmt->fetchColumn();
+        $newPosition = $maxPos !== null && $maxPos !== false ? (int) $maxPos + 1 : null;
+
         $ins = $pdo->prepare(
-            'INSERT INTO forecast_places (password_id, name, latitude, longitude, created_at) VALUES (:pid, :name, :lat, :lon, :created_at)'
+            'INSERT INTO forecast_places (password_id, name, latitude, longitude, position, created_at) VALUES (:pid, :name, :lat, :lon, :position, :created_at)'
         );
         try {
             $ins->execute([
@@ -486,6 +506,7 @@ switch ($action) {
                 'name'       => $name,
                 'lat'        => $lat,
                 'lon'        => $lon,
+                'position'   => $newPosition,
                 'created_at' => gmdate('Y-m-d H:i:s'),
             ]);
         } catch (PDOException $e) {
@@ -512,6 +533,52 @@ switch ($action) {
         $del->execute(['id' => $placeId, 'pid' => $passwordId]);
         if ($del->rowCount() === 0) {
             fail(404, 'No such place.');
+        }
+
+        $settings = currentSettings($pdo, (int) $passwordId);
+        echo json_encode(['ok' => true, 'settings' => $settings]);
+        break;
+    }
+
+    case 'reorder_places': {
+        $passwordId = $_SESSION['password_id'] ?? null;
+        if (!$passwordId) {
+            fail(401, 'Not logged in.');
+        }
+        $ids = $input['ids'] ?? null;
+        if (!is_array($ids) || count($ids) < 1) {
+            fail(400, 'ids is required.');
+        }
+        $clean = [];
+        foreach ($ids as $id) {
+            if (!is_int($id) && !(is_string($id) && ctype_digit($id))) {
+                fail(400, 'ids must be a list of place ids.');
+            }
+            $clean[] = (int) $id;
+        }
+
+        // Must be exactly this profile's current set of place ids,
+        // reordered — not a subset/superset, so this endpoint can only
+        // reorder, never add or remove a row (that's add_place/remove_place).
+        $currentIds = array_map(fn($p) => $p['id'], fetchPlaces($pdo, (int) $passwordId));
+        $sortedCurrent = $currentIds;
+        $sortedClean = $clean;
+        sort($sortedCurrent);
+        sort($sortedClean);
+        if ($sortedCurrent !== $sortedClean) {
+            fail(400, "ids must match this profile's current set of places exactly.");
+        }
+
+        try {
+            $pdo->beginTransaction();
+            $upd = $pdo->prepare('UPDATE forecast_places SET position = :position WHERE id = :id AND password_id = :pid');
+            foreach ($clean as $position => $id) {
+                $upd->execute(['position' => $position, 'id' => $id, 'pid' => $passwordId]);
+            }
+            $pdo->commit();
+        } catch (PDOException $e) {
+            $pdo->rollBack();
+            fail(500, 'Could not save that order: ' . $e->getMessage());
         }
 
         $settings = currentSettings($pdo, (int) $passwordId);
