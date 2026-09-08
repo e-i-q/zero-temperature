@@ -9,10 +9,12 @@
   const WEATHERMAP_URL = 'api/weathermap.php';
   const REFRESH_MS = 60000; // poll for new data every minute
   const FORECAST_REFRESH_MS = REFRESH_MS * 5; // forecast.php itself caches Open-Meteo for 30min
-  // Geographic centroid of the Czech Republic and a zoom that fits the
-  // whole country in #weather-map's default size — see initWeatherMap().
+  // Geographic centroid of the Czech Republic and a zoom that shows the
+  // whole country plus enough of its neighbors for weather-system context
+  // (an approaching front rarely respects the border) — see
+  // initWeatherMap().
   const CZ_CENTER = [49.8175, 15.4730];
-  const CZ_ZOOM = 7;
+  const CZ_ZOOM = 6;
   const RANGE_STORAGE_KEY = 'hiveRange';
   const FORECAST_RANGE_STORAGE_KEY = 'hiveForecastRange';
   // The fixed chip set for logged-out visitors (and brand-new profiles) —
@@ -924,15 +926,24 @@
   //    markers, sourced from api/weathermap.php?action=thunder, instead of
   //    a fourth tile overlay like the other three. -----------------------
 
+  // Layer code + how much to dim each tile below its own native opacity.
+  // OpenWeatherMap's free clouds_new/wind_new tiles already encode
+  // intensity as per-pixel alpha (calm wind / light cloud = mostly
+  // transparent, not just "small numbers") — any opacity we multiply on
+  // top makes an already-faint tile fainter still, which is what made both
+  // layers read as "nothing there" even though the tiles genuinely had
+  // real (just light) data in them. precipitation_new's colors are already
+  // fully saturated at any real rain intensity, so it's the one layer
+  // still worth dimming, to keep the base map legible underneath it.
   const OWM_TILE_LAYERS = {
-    clouds: 'clouds_new',
-    rain: 'precipitation_new',
-    wind: 'wind_new',
+    clouds: { code: 'clouds_new', opacity: 1 },
+    rain: { code: 'precipitation_new', opacity: 0.8 },
+    wind: { code: 'wind_new', opacity: 1 },
   };
 
-  function owmTileLayer(layerCode, appid) {
+  function owmTileLayer(layerCode, opacity, appid) {
     return L.tileLayer(`https://tile.openweathermap.org/map/${layerCode}/{z}/{x}/{y}.png?appid=${appid}`, {
-      opacity: 0.7,
+      opacity,
       attribution: '&copy; <a href="https://openweathermap.org/">OpenWeatherMap</a>',
     });
   }
@@ -963,8 +974,14 @@
 
   async function initWeatherMap() {
     weatherMap = L.map('weather-map').setView(CZ_CENTER, CZ_ZOOM);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    // A muted, low-saturation basemap (not standard OSM's bright greens/
+    // yellows) so the faint white/pale OWM overlays above actually show up
+    // against it instead of blending into busy terrain colors — the same
+    // reason weather-map sites generally pick a plain basemap for this.
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      subdomains: 'abcd',
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
     }).addTo(weatherMap);
 
     thunderMarkers = L.layerGroup();
@@ -978,8 +995,8 @@
 
     try {
       const { appid } = await fetchJson(`${WEATHERMAP_URL}?action=tiles`);
-      Object.entries(OWM_TILE_LAYERS).forEach(([key, layerCode]) => {
-        const layer = owmTileLayer(layerCode, appid);
+      Object.entries(OWM_TILE_LAYERS).forEach(([key, { code, opacity }]) => {
+        const layer = owmTileLayer(code, opacity, appid);
         owmLayers[key] = layer;
         if (mapLayerDefaults[key]) layer.addTo(weatherMap);
       });
