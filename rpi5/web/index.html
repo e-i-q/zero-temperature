@@ -133,6 +133,23 @@
          cache freshness — see loadForecast(). -->
     <div class="forecast-cards" id="forecast-cards"></div>
 
+    <!-- Static weather radar map embed from in-pocasi.cz. Third-party
+         widget markup is kept verbatim (their <script> renders into this
+         div), just wrapped in the usual .chart-card shell for a consistent
+         look with the cards above. -->
+    <section class="chart-card forecast-map-card">
+      <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+      <div class="chart-head">
+        <span class="chart-title">Weather map (in-počasí)</span>
+      </div>
+      <div class="chart-wrap forecast-map-wrap">
+        <div style="text-align: center; width: 486px;">
+          <script type="text/javascript" src="https://www.in-pocasi.cz/pocasi-na-web/pocasi-na-web.php?typ=dark&layout=mapa&dni=1"></script>
+          <a href="https://www.in-pocasi.cz" title="In-počasí">In-počasí</a>
+        </div>
+      </div>
+    </section>
+
   </div>
 
   <div class="tab-panel" data-panel="settings" hidden>
