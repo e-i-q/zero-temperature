@@ -792,11 +792,6 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; }
    stacks the cards. */
 .forecast-cards { display: block; }
 
-
-/* Third-party in-pocasi.cz map widget is a fixed 486px-wide block; center it
-   inside the full-width chart-card shell rather than stretching left. */
-.forecast-map-wrap { display: flex; justify-content: center; }
-
 /* -- Weather map (Forecast tab) — see initWeatherMap() in script.js -------- */
 #map-legend { margin-top: 6px; }
 .map-wrap { margin-top: 8px; }
