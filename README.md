@@ -10,7 +10,7 @@ things that actually get deployed, one per device role:
 DHT22 sensor  →     │  RPi Zero   │  →     │    RPi 5    │  →  dashboard
                     │ rpi-zero/   │  psql  │ (Hive DB +  │     (browser)
                     └─────────────┘        │  rpi5/)     │
-                                            └─────────────┘
+                                           └─────────────┘
 ```
 
 | Directory | Runs on | Purpose |
