@@ -81,6 +81,19 @@ On-demand readings (--ondemand-dir):
     Only one process can talk to the DHT22 at a time, so every run (cron or
     on-demand) first takes an exclusive lock next to the database file —
     whichever comes second simply waits for the first to finish.
+
+Offline SD-card flushing (--sd-backup):
+    The local SQLite file lives on a RAM disk that's normally copied to the
+    SD card only once a day. While the remote DB is unreachable, that RAM
+    copy is the only copy of every reading since the connection dropped —
+    and an offline Zero is the one most likely to get unplugged to debug it.
+    So whenever a run can't mirror its reading, it also flushes the database
+    to the SD card (sd_backup.flush_to_sd()) if the last such flush is older
+    than `offline_flush_hours` (default 3; 0 = off). That value is a Hive
+    setting (Settings tab → `hive_config` table), fetched on every
+    successful connection and cached in the local sync_state table, so it's
+    still known while offline. The first offline run always flushes unless
+    one happened within that interval.
 """
 
 import argparse
@@ -97,6 +110,7 @@ import adafruit_dht
 import psycopg2
 import local_db
 import remote_db
+import sd_backup
 import sync_backlog
 
 # ── Configuration ──────────────────────────────────────────────────────────
@@ -108,6 +122,7 @@ DEFAULT_DB_PATH = "/mnt/sqlite_ram/sensors.db"
 DEFAULT_SENSOR_NAME = "dht22"
 LOCK_FILE_NAME = "dht22_logger.lock"  # lives next to the database file
 LOCK_TIMEOUT_S = 300                   # a full 50-attempt run takes ~2 minutes; never wait forever
+DEFAULT_OFFLINE_FLUSH_HOURS = 3.0      # used until the Hive's hive_config.offline_flush_hours is first fetched
 
 
 def _now_iso() -> str:
@@ -257,7 +272,50 @@ def store_reading(
     return row_id
 
 
+def cache_offline_flush_hours(conn, db_path: str) -> None:
+    """Fetch hive_config.offline_flush_hours over an open remote connection
+    and cache it locally (see the "Offline SD-card flushing" docstring
+    section). An unset/invalid value caches NULL → the default applies."""
+    raw = remote_db.fetch_config(conn, "offline_flush_hours")
+    try:
+        hours = float(raw) if raw is not None else None
+    except ValueError:
+        hours = None
+    if hours is not None and hours < 0:
+        hours = None
+    try:
+        local_db.set_offline_flush_hours(db_path, hours)
+    except sqlite3.Error as e:
+        print(f"WARNING: could not cache offline_flush_hours locally: {e}", file=sys.stderr)
+
+
+def flush_if_offline_due(db_path: str, backup_file: str) -> None:
+    """Called after a run failed to reach the remote DB: copy the RAM
+    database to the SD card if the last offline flush is older than the
+    configured interval. Best-effort — a failure is logged, never fatal."""
+    cached_hours, last_flush = local_db.get_offline_flush_state(db_path)
+    hours = DEFAULT_OFFLINE_FLUSH_HOURS if cached_hours is None else cached_hours
+    if hours <= 0:
+        return
+    now = datetime.now(timezone.utc)
+    if last_flush:
+        try:
+            age_h = (now - datetime.fromisoformat(last_flush)).total_seconds() / 3600
+        except ValueError:
+            age_h = float("inf")
+        if age_h < hours:
+            return
+    try:
+        size = sd_backup.flush_to_sd(db_path, backup_file)
+    except (OSError, sqlite3.Error) as e:
+        print(f"WARNING: offline flush to SD card failed: {e}", file=sys.stderr)
+        return
+    local_db.set_last_sd_flush(db_path, now.isoformat(timespec="seconds"))
+    print(f"Offline: flushed database to SD card → {backup_file} ({size} bytes, every {hours:g}h while offline)")
+
+
 def store_reading_remote(
+    db_path: str,
     hostname: str,
     timestamp: str,
     temperature_c: float,
@@ -300,6 +358,7 @@ def store_reading_remote(
         # DHT22 read, so any previously-flagged fault has resolved.
         remote_db.update_dht22_fault(conn, hostname, False)
         print(f"Stored: {timestamp}  {temperature_c:.2f}°C  {humidity_pct:.2f}%  (n={sample_count}) → {remote_db.PG_HOST}/{remote_db.PG_DBNAME}")
+        cache_offline_flush_hours(conn, db_path)
         return True
     except psycopg2.Error as e:
         conn.rollback()
@@ -317,6 +376,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--delay", type=float, default=DEFAULT_DELAY, help=f"Seconds between readings (default {DEFAULT_DELAY}, min recommended 2.0)")
     parser.add_argument("--db", type=str, default=DEFAULT_DB_PATH, help=f"Path to SQLite database file (default {DEFAULT_DB_PATH})")
     parser.add_argument("--sensor-name", type=str, default=DEFAULT_SENSOR_NAME, help=f"Label stored in the 'sensor' column (default {DEFAULT_SENSOR_NAME})")
+    parser.add_argument("--sd-backup", type=str, default=sd_backup.DEFAULT_BACKUP_FILE, help=f"SD card backup file flushed to while offline (default {sd_backup.DEFAULT_BACKUP_FILE}; see docstring)")
     parser.add_argument("--ondemand-dir", type=str, default=None, help="On-demand run: claim <dir>/request.json and write live progress to <dir>/status.json (see docstring)")
     return parser.parse_args()
 
@@ -398,7 +458,7 @@ def main() -> int:
 
     hostname = remote_db.local_hostname()
     was_offline = not local_db.get_last_remote_ok(str(db_path))
-    remote_ok = store_reading_remote(hostname, timestamp, avg_temp, avg_hum, success_count, attempts, args.max_attempts)
+    remote_ok = store_reading_remote(str(db_path), hostname, timestamp, avg_temp, avg_hum, success_count, attempts, args.max_attempts)
     local_db.set_last_remote_ok(str(db_path), remote_ok)
 
     if progress is not None:
@@ -410,6 +470,9 @@ def main() -> int:
             avg_hum=round(avg_hum, 2),
             message=None if remote_ok else "Stored locally only — the Hive database was unreachable.",
         )
+
+    if not remote_ok:
+        flush_if_offline_due(str(db_path), args.sd_backup)
 
     if remote_ok:
         local_db.mark_synced(str(db_path), row_id, timestamp)

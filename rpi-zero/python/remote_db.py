@@ -162,6 +162,23 @@ def update_dht22_fault(conn, hostname: str, faulty: bool) -> None:
     conn.commit()
 
 
+def fetch_config(conn, key: str) -> str | None:
+    """One value from the Hive's fleet-wide `hive_config` table (see the
+    `db` project's hive_config.md), or None if the key isn't set — or the
+    table doesn't exist / isn't readable yet (a Hive that hasn't re-run
+    setup_db.py since it was added). Never raises for that; the caller
+    falls back to its default. Leaves the connection usable."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT value FROM hive_config WHERE key = %s", (key,))
+            row = cur.fetchone()
+        conn.commit()
+        return row[0] if row else None
+    except psycopg2.Error:
+        conn.rollback()
+        return None
+
+
 def local_hostname() -> str:
     """Equivalent of `uname -n` — used as this RPi's name in the remote `sensors` table."""
     return os.uname().nodename

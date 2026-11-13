@@ -59,6 +59,17 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute("INSERT OR IGNORE INTO sync_state (id, last_remote_ok) VALUES (1, 0)")
+
+    # Offline SD-card flushing (see sd_backup.py): offline_flush_hours is the
+    # Hive's `hive_config.offline_flush_hours`, cached here on every
+    # successful connection because it's needed precisely while the Hive is
+    # unreachable (NULL = never fetched, use the default);
+    # last_sd_flush_at is when this Pi last made such a flush (ISO UTC).
+    state_cols = {row[1] for row in conn.execute("PRAGMA table_info(sync_state)")}
+    if "offline_flush_hours" not in state_cols:
+        conn.execute("ALTER TABLE sync_state ADD COLUMN offline_flush_hours REAL")
+    if "last_sd_flush_at" not in state_cols:
+        conn.execute("ALTER TABLE sync_state ADD COLUMN last_sd_flush_at TEXT")
     conn.commit()
 
 
@@ -77,6 +88,37 @@ def set_last_remote_ok(db_path: str, ok: bool) -> None:
     try:
         ensure_schema(conn)
         conn.execute("UPDATE sync_state SET last_remote_ok = ? WHERE id = 1", (1 if ok else 0,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_offline_flush_state(db_path: str) -> tuple[float | None, str | None]:
+    """(cached offline_flush_hours or None, last_sd_flush_at or None)."""
+    conn = sqlite3.connect(db_path)
+    try:
+        ensure_schema(conn)
+        row = conn.execute("SELECT offline_flush_hours, last_sd_flush_at FROM sync_state WHERE id = 1").fetchone()
+        return (row[0], row[1]) if row else (None, None)
+    finally:
+        conn.close()
+
+
+def set_offline_flush_hours(db_path: str, hours: float | None) -> None:
+    conn = sqlite3.connect(db_path)
+    try:
+        ensure_schema(conn)
+        conn.execute("UPDATE sync_state SET offline_flush_hours = ? WHERE id = 1", (hours,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def set_last_sd_flush(db_path: str, when: str) -> None:
+    conn = sqlite3.connect(db_path)
+    try:
+        ensure_schema(conn)
+        conn.execute("UPDATE sync_state SET last_sd_flush_at = ? WHERE id = 1", (when,))
         conn.commit()
     finally:
         conn.close()

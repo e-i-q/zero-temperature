@@ -251,6 +251,22 @@
               </p>
               <ul class="label-list" id="offset-list"></ul>
 
+              <p class="settings-status">SD card backup while offline:</p>
+              <p class="settings-current">
+                A Pi Zero keeps its readings on a RAM disk that's normally
+                copied to its SD card once a day. While it can't reach the
+                Hive, it copies it this often instead, so unplugging or
+                rebooting an offline Zero loses at most this much data.
+                Fleet-wide; each Zero picks up a change the next time it's
+                online. 0 turns the extra copies off.
+              </p>
+              <form class="settings-form" id="offline-flush-form">
+                <input type="number" class="settings-input offset-input" id="offline-flush-input" min="0" max="24" step="0.25" required>
+                <span class="offset-unit offline-flush-unit">hours</span>
+                <button type="submit" class="btn btn-secondary">Save</button>
+              </form>
+              <p class="settings-error" id="offline-flush-result" hidden></p>
+
               <p class="settings-status">Sensors:</p>
               <p class="settings-current">
                 Each Pi Zero's online/offline status, LAN address, uptime

@@ -1412,6 +1412,11 @@
     // ...and its saved forecast places — see forecastPlaces above.
     forecastPlaces = Array.isArray(settings.places) ? settings.places : [];
     renderPlacesList();
+    // Fleet-wide offline SD flush interval (hive_config) — see the
+    // offline-flush-form handler below.
+    if (typeof settings.offline_flush_hours === 'number') {
+      el('offline-flush-input').value = String(settings.offline_flush_hours);
+    }
   }
 
   // Fire-and-forget save, called from the range-chip handlers below when
@@ -1754,6 +1759,31 @@
     if (e.key !== 'Enter' || !e.target.closest('.offset-input')) return;
     e.preventDefault();
     saveSensorOffset(e.target.closest('.offset-item'));
+  });
+
+  // -- Offline SD flush interval (Settings tab, Sensors section) --------------
+  // hive_config.offline_flush_hours via settings.php — read by every Pi
+  // Zero's dht22_logger.py, see rpi-zero/python/sd_backup.py.
+  el('offline-flush-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const box = el('offline-flush-result');
+    box.hidden = true;
+    const btn = e.target.querySelector('button');
+    btn.disabled = true;
+    try {
+      const payload = await postSettings('save_offline_flush_hours', { hours: Number(el('offline-flush-input').value) });
+      el('offline-flush-input').value = String(payload.offline_flush_hours);
+      box.textContent = payload.offline_flush_hours > 0
+        ? `Saved — offline Zeros will back up to SD every ${payload.offline_flush_hours} h.`
+        : 'Saved — offline Zeros only do the normal daily backup.';
+      box.style.color = 'var(--status-good-text)';
+    } catch (err) {
+      box.textContent = err.message;
+      box.style.color = '';
+    } finally {
+      box.hidden = false;
+      btn.disabled = false;
+    }
   });
 
   // -- Forecast places (Settings tab, Forecast section) ------------------------

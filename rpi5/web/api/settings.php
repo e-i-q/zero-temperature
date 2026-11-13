@@ -79,6 +79,7 @@
  *   {"action": "save_ranges", "ranges": ["6h", "12h", "24h", "2d", "5d", "1w", "1m"]}
  *   {"action": "save_sensor_label", "sensor": "dht22-01", "label": "Kitchen"}
  *   {"action": "save_sensor_offset", "sensor": "dht22-01", "temp_offset_c": -0.8, "humidity_offset_pct": 3}
+ *   {"action": "save_offline_flush_hours", "hours": 3}
  *   {"action": "add_place", "name": "Brno, South Moravian Region, Czechia", "latitude": 49.19522, "longitude": 16.60796}
  *   {"action": "remove_place", "id": 3}
  *   {"action": "reorder_places", "ids": [5, 3, 7]}
@@ -112,6 +113,13 @@
  * every profile. Raw readings are never touched; readings.php/daily.php add
  * the offsets on the way out. Both 0 deletes the row.
  *
+ * `save_offline_flush_hours` sets the fleet-wide `hive_config` key of the
+ * same name (see ../../../../db/database/sensors/tables/hive_config.md):
+ * how often an offline Pi Zero copies its RAM database to its SD card
+ * (rpi-zero/python/dht22_logger.py fetches it on every successful
+ * connection). Fleet-wide like offsets, not per profile; every settings
+ * payload carries its current value as `offline_flush_hours`.
+ *
  * All responses are JSON. Errors use db.php's fail() shape ({"error": "..."}),
  * the same convention script.js's fetchJson() already expects from every
  * other api/*.php endpoint.
@@ -126,6 +134,8 @@ const MAX_PLACES = 8; // sane ceiling on how many forecast locations one profile
 const MAX_PLACE_NAME_LEN = 120; // fits geocode.php's longest composed "name, admin1, country" label
 const MAX_TEMP_OFFSET_C = 20.0;      // sanity bounds on calibration offsets — a DHT22
 const MAX_HUMIDITY_OFFSET_PCT = 50.0; // that's off by more than this needs replacing, not correcting
+const DEFAULT_OFFLINE_FLUSH_HOURS = 3.0; // matches rpi-zero/python/dht22_logger.py's default
+const MAX_OFFLINE_FLUSH_HOURS = 24.0;    // the normal daily flush already covers anything longer
 
 // Keep the server-side session file alive as long as the cookie claims it
 // is. Only fixes GC triggered by this request (gc_probability, which
@@ -216,6 +226,19 @@ function fetchPlaces(PDO $pdo, int $passwordId): array {
     return $places;
 }
 
+// Fleet-wide hive_config.offline_flush_hours, or the default when unset —
+// or when the table doesn't exist yet (setup_db.py not re-run since it was
+// added; see db.php's tableExists()).
+function offlineFlushHours(PDO $pdo): float {
+    if (!tableExists($pdo, 'hive_config')) {
+        return DEFAULT_OFFLINE_FLUSH_HOURS;
+    }
+    $stmt = $pdo->prepare("SELECT value FROM hive_config WHERE key = 'offline_flush_hours'");
+    $stmt->execute();
+    $value = $stmt->fetchColumn();
+    return ($value !== false && is_numeric($value)) ? (float) $value : DEFAULT_OFFLINE_FLUSH_HOURS;
+}
+
 // Reads a profile's settings row, normalizing a NULL/empty `ranges` column
 // (either a pre-existing profile from before this column existed, or one
 // that's never customized its list) to the default set. Returns `ranges` as
@@ -239,6 +262,7 @@ function currentSettings(PDO $pdo, int $passwordId): ?array {
         'ranges'         => explode(',', $rangesStr),
         'labels'         => decodeLabels($row['sensor_labels']),
         'places'         => fetchPlaces($pdo, $passwordId),
+        'offline_flush_hours' => offlineFlushHours($pdo),
     ];
 }
 
@@ -342,6 +366,7 @@ switch ($action) {
                 'ranges'         => DEFAULT_RANGES,
                 'labels'         => [],
                 'places'         => [], // brand new profile — nothing saved yet
+                'offline_flush_hours' => offlineFlushHours($pdo),
             ],
         ]);
         break;
@@ -424,6 +449,7 @@ switch ($action) {
                 'forecast_range' => $forecastRange,
                 'labels'         => $current['labels'],
                 'places'         => $current['places'],
+                'offline_flush_hours' => $current['offline_flush_hours'],
             ],
         ]);
         break;
@@ -510,6 +536,32 @@ switch ($action) {
             fail(500, 'Could not save offsets: ' . $e->getMessage());
         }
         echo json_encode(['ok' => true, 'sensor' => $sensorName, 'temp_offset_c' => $tempOffset, 'humidity_offset_pct' => $humOffset]);
+        break;
+    }
+
+    case 'save_offline_flush_hours': {
+        $passwordId = $_SESSION['password_id'] ?? null;
+        if (!$passwordId) {
+            fail(401, 'Not logged in.');
+        }
+        $hours = $input['hours'] ?? null;
+        if (!is_numeric($hours)) {
+            fail(400, 'hours must be a number.');
+        }
+        $hours = round((float) $hours, 2);
+        if ($hours < 0 || $hours > MAX_OFFLINE_FLUSH_HOURS || ($hours > 0 && $hours < 0.25)) {
+            fail(400, 'Interval must be 0 (off) or between 0.25 and ' . MAX_OFFLINE_FLUSH_HOURS . ' hours.');
+        }
+        try {
+            $stmt = $pdo->prepare(
+                "INSERT INTO hive_config (key, value, updated_at) VALUES ('offline_flush_hours', :v, :at)
+                 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at"
+            );
+            $stmt->execute(['v' => (string) $hours, 'at' => gmdate('Y-m-d H:i:s')]);
+        } catch (PDOException $e) {
+            fail(500, 'Could not save the interval (has setup_db.py been re-run for hive_config?): ' . $e->getMessage());
+        }
+        echo json_encode(['ok' => true, 'offline_flush_hours' => $hours]);
         break;
     }
 

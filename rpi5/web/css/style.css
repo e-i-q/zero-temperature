@@ -833,6 +833,7 @@ svg text { font-family: var(--font-mono); fill: var(--color-text-muted); }
 .offset-field { display: flex; align-items: center; gap: 4px; flex: none; }
 .offset-input { flex: none; width: 78px; }
 .offset-unit { font: 400 11px var(--font-mono); color: var(--color-text-muted); }
+.offline-flush-unit { align-self: center; }
 
 /* -- On-demand reading window (Overview "Read Now") ------------------------- */
 .modal-backdrop {

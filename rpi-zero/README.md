@@ -31,6 +31,7 @@ failing. Nothing needs to be done by hand to catch back up: see
 | `python/report_version.py` | Reads this Pi's currently-deployed git commit and writes it to the central DB — see "Version reporting" below |
 | `python/remote_db.py` | Shared PostgreSQL connection/config, used by `dht22_logger.py`, `ups_ina219.py`, `uptime_reporter.py`, `report_version.py` and `sync_backlog.py` |
 | `python/sync_backlog.py` | Pushes any local readings not yet confirmed on the central DB — see "Offline backlog sync" below |
+| `python/sd_backup.py` | Copies the RAM-disk database to the SD card more often while offline — see "Offline SD-card backups" below |
 | `web/index.html`, `web/css/`, `web/js/` | Dashboard: live readings, min/max/avg stats, timeline chart with sunrise/sunset markers |
 | `web/readings.php` | JSON API the dashboard polls; queries the SQLite database read-only |
 | `web/sync.php` | Runs `sync_backlog.py` on demand, gated by a shared secret — see "Manual sync trigger (from the Hive)" below |
@@ -273,9 +274,31 @@ redeploy this one Pi Zero on demand, e.g. right after it comes back online
 having missed the last push's fleet-wide relay, without waiting for the
 next push.
 
+## Offline SD-card backups
+
+While this Pi can't reach the Hive, its RAM disk holds the only copy of
+every reading since the connection dropped — and an offline Zero is
+exactly the one that gets unplugged or rebooted to debug it. So every
+logger run that fails to mirror its reading also copies the database to
+the SD card (`python/sd_backup.py`, same file and format as the daily
+flush, so the boot-time restore picks it up unchanged) if the last such
+copy is older than the **offline backup interval** — 3 hours by default,
+set fleet-wide on the Hive's Settings tab → Sensors (0 = off). The
+interval is fetched from the Hive on every successful connection and
+cached locally, since it's needed precisely when the Hive is unreachable.
+The first offline run copies right away.
+
+Needs the `hive_config` table on the Hive (re-run the `db` project's
+`setup_db.py`); until then the 3-hour default applies. Nothing to set up
+here — the logger writes `/var/lib/sqlite_backup/sensors.db.gz` itself
+(`--sd-backup` to change), which `setup_sqlite_ramdisk.sh` already made
+owned by the logger's user.
+
 ## Why SQLite on a RAM disk?
 
 The Pi Zero's SD card wears out under frequent writes. The live database
 lives in a tmpfs RAM disk, gets flushed to the SD card once a day (and on
 graceful shutdown), and is restored from that backup on boot — trading up to
-24h of data loss on a hard power failure for far fewer SD writes.
+24h of data loss on a hard power failure for far fewer SD writes. While
+offline that window shrinks to the offline backup interval (see above),
+since then nothing else holds a copy.
