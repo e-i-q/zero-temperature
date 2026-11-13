@@ -46,6 +46,8 @@ failing. Nothing needs to be done by hand to catch back up: see
 | `setup/deploy_web.sh` | Syncs `web/` into the nginx web root |
 | `setup/git_deploy.sh` | Pulls the latest `main`, re-runs `deploy_web.sh`, and reports the new commit to the Hive — what `deploy_trigger.php` actually runs |
 | `setup/setup_deploy_trigger.sh` | Provisions `web/deploy_trigger.php`'s shared secret and the sudo rule it needs to redeploy as root |
+| `setup/net_watchdog.sh` | Network watchdog run every minute: reconnects Wi-Fi when offline, reboots as a last resort — see "Staying online" below |
+| `setup/setup_net_watchdog.sh` | Installs the watchdog and hardens Wi-Fi so it reconnects without anyone logged in — see "Staying online" below |
 | `setup/lib/log.sh` | Shared colored logging + quiet-by-default install output for the scripts above |
 
 ## Hardware
@@ -273,6 +275,54 @@ button for this sensor (`../rpi5/web/api/deploy_trigger.php`) — a way to
 redeploy this one Pi Zero on demand, e.g. right after it comes back online
 having missed the last push's fleet-wide relay, without waiting for the
 next push.
+
+## Staying online
+
+Symptoms this addresses: a Zero drops off the network and stays off,
+and a monitor shows either a **"Wi-Fi password" dialog** or the **desktop
+login screen** asking for the OS password.
+
+Both point at the same root cause on Raspberry Pi OS (NetworkManager): a
+Wi-Fi network joined from the desktop can keep its password in the
+desktop user's keyring ("agent-owned") instead of in NetworkManager's
+system config. NetworkManager then only gets the password from a
+logged-in desktop session — so after a reboot that lands on the login
+screen there's no Wi-Fi at all, and after any failed handshake (weak
+signal, router restart) it asks the desktop for the password again and
+stops auto-connecting until someone answers the dialog.
+
+```bash
+sudo bash setup/setup_net_watchdog.sh
+# if it warns that a password lives in a user keyring:
+sudo WIFI_PSK='<wifi password>' bash setup/setup_net_watchdog.sh
+# recommended for sensor nodes — no desktop, no login screen:
+sudo BOOT_TO_CONSOLE=1 bash setup/setup_net_watchdog.sh
+```
+
+What it does:
+
+- **Wi-Fi hardening** — every saved Wi-Fi connection gets its password
+  stored system-wide (`psk-flags 0`), is usable without any user logged in,
+  auto-connect retries forever instead of giving up after 4 tries, and
+  Wi-Fi power saving is off (a classic Pi Zero W drop-out cause).
+- **Network watchdog** (`net-watchdog.timer`, every minute, logs to
+  `/var/log/net_watchdog.log`) — online means the gateway, the Hive, *or*
+  the Hive's PostgreSQL port answers, so a Hive outage alone never
+  triggers anything. After 3 minutes offline it cycles the Wi-Fi radio and
+  explicitly re-activates the saved networks (which also clears
+  NetworkManager's "waiting for a password" block), repeating every 5
+  minutes. After 30 minutes offline it flushes the database to the SD card
+  and reboots; each reboot that doesn't bring the network back doubles
+  that wait (up to 12 h), so a Zero taken out of Wi-Fi range doesn't
+  reboot-loop. Connectivity coming back resets it. Tunables:
+  `RECONNECT_AFTER_MIN`, `RECONNECT_EVERY_MIN`, `REBOOT_AFTER_MIN` (0 =
+  never reboot), `MAX_REBOOT_AFTER_MIN` — as env vars to the setup script,
+  saved in `/etc/default/net_watchdog`.
+- **Hardware watchdog** (`RuntimeWatchdogSec=15`) — resets the Pi if the
+  kernel itself freezes. `HW_WATCHDOG=0` to skip.
+
+The watchdog is installed as a copy (`/usr/local/sbin/net_watchdog`), so
+re-run the setup script after pulling a change to `net_watchdog.sh`.
 
 ## Offline SD-card backups
 
