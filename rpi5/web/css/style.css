@@ -828,6 +828,12 @@ svg text { font-family: var(--font-mono); fill: var(--color-text-muted); }
    shows the chart behind it. */
 :root[data-theme="dark"] .weather-icon { filter: invert(1); }
 
+/* -- Sensor offsets (Settings tab, Sensors section) — reuses .label-item -- */
+.offset-item .label-item-name { flex: 1 1 120px; }
+.offset-field { display: flex; align-items: center; gap: 4px; flex: none; }
+.offset-input { flex: none; width: 78px; }
+.offset-unit { font: 400 11px var(--font-mono); color: var(--color-text-muted); }
+
 /* -- On-demand reading window (Overview "Read Now") ------------------------- */
 .modal-backdrop {
   position: fixed;

@@ -51,6 +51,21 @@ function toIsoTz(string $pgTimestamptz): string {
     return (new DateTimeImmutable($pgTimestamptz))->format(DateTimeInterface::ATOM);
 }
 
+// Whether `table` exists yet. For tables added after the dashboard first
+// shipped (e.g. sensor_offsets): a push to main redeploys this web root
+// right away, but the table only appears once setup_db.py is re-run in the
+// `db` project — until then, readers skip the feature instead of 500ing the
+// whole dashboard.
+function tableExists(PDO $pdo, string $table): bool {
+    static $cache = [];
+    if (!array_key_exists($table, $cache)) {
+        $stmt = $pdo->prepare('SELECT to_regclass(:t) IS NOT NULL');
+        $stmt->execute(['t' => 'public.' . $table]);
+        $cache[$table] = (bool) $stmt->fetchColumn();
+    }
+    return $cache[$table];
+}
+
 function db(): PDO {
     static $pdo = null;
     if ($pdo !== null) {

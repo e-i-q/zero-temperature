@@ -13,6 +13,14 @@
  *                (web/api/settings.php), so this parses the general shape
  *                instead of matching against a hardcoded list — see
  *                rangeModifier() below.
+ *
+ * Calibration offsets: every temperature/humidity value returned here
+ * (series points, `latest`, `stats`) already has that sensor's offset from
+ * the `sensor_offsets` table added — set on the Settings tab, see
+ * ../../../../db/database/sensors/tables/sensor_offsets.md. The database
+ * itself keeps the raw DHT22 values; each sensor's offsets are also
+ * returned as `temp_offset_c`/`humidity_offset_pct` so the dashboard can
+ * correct values it gets from elsewhere (the on-demand reading window).
  */
 
 declare(strict_types=1);
@@ -69,7 +77,15 @@ $pdo = db();
 // readings in this window, so the dashboard can still render an offline
 // tile for them instead of silently dropping them. --------------------------
 try {
-    $sensors = $pdo->query('SELECT id, name, description, ip_address, status, battery_voltage_v, battery_current_ma, battery_power_w, uptime_seconds, commit_hash, commit_summary, commit_date, last_ping_at, dht22_fault_at FROM sensors ORDER BY name')->fetchAll();
+    $hasOffsets = tableExists($pdo, 'sensor_offsets'); // see db.php's tableExists()
+    $sensors = $pdo->query(
+        'SELECT s.id, s.name, s.description, s.ip_address, s.status, s.battery_voltage_v, s.battery_current_ma, s.battery_power_w,
+                s.uptime_seconds, s.commit_hash, s.commit_summary, s.commit_date, s.last_ping_at, s.dht22_fault_at, '
+        . ($hasOffsets
+            ? 'o.temp_offset_c, o.humidity_offset_pct FROM sensors s LEFT JOIN sensor_offsets o ON o.sensor_id = s.id'
+            : 'NULL AS temp_offset_c, NULL AS humidity_offset_pct FROM sensors s')
+        . ' ORDER BY s.name'
+    )->fetchAll();
 } catch (PDOException $e) {
     fail(500, 'Could not read sensor registry: ' . $e->getMessage());
 }
@@ -100,8 +116,10 @@ try {
 // -- Shape into per-sensor series + per-sensor latest/stats -------------------
 $series = [];
 $latestBySensor = [];
+$offsets = []; // sensor id => [temp offset °C, humidity offset %]
 foreach ($sensors as $s) {
     $series[(int) $s['id']] = [];
+    $offsets[(int) $s['id']] = [(float) ($s['temp_offset_c'] ?? 0), (float) ($s['humidity_offset_pct'] ?? 0)];
 }
 
 foreach ($rows as $row) {
@@ -109,10 +127,11 @@ foreach ($rows as $row) {
     if (!array_key_exists($sid, $series)) {
         continue; // reading references a sensor_id no longer in the registry
     }
+    [$tempOffset, $humOffset] = $offsets[$sid];
     $point = [
         'recorded_at'   => toIsoUtc($row['recorded_at']),
-        'temperature_c' => round((float) $row['temperature_c'], 2),
-        'humidity_pct'  => round((float) $row['humidity_pct'], 2),
+        'temperature_c' => round((float) $row['temperature_c'] + $tempOffset, 2),
+        'humidity_pct'  => round(max(0.0, min(100.0, (float) $row['humidity_pct'] + $humOffset)), 2),
         'sample_count'  => (int) $row['sample_count'],
         // Total attempts this run made and its configured ceiling — null
         // together for rows predating this tracking (see readings.md in
@@ -184,6 +203,10 @@ foreach ($sensors as $s) {
         // ../../../../db/database/sensors/tables/sensors.md.
         'dht22_fault'       => $s['dht22_fault_at'] !== null,
         'dht22_fault_since' => $s['dht22_fault_at'] !== null ? toIsoTz($s['dht22_fault_at']) : null,
+        // Calibration offsets already applied to every value in this
+        // response — see the docstring. 0 when none is set.
+        'temp_offset_c'       => $offsets[$sid][0],
+        'humidity_offset_pct' => $offsets[$sid][1],
         'latest'      => $latest,
         'stats'       => $temps ? [
             'temp_min' => round(min($temps), 1),

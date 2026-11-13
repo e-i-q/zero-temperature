@@ -78,6 +78,7 @@
  *   {"action": "save",   "overview_range": "24h", "forecast_range": "24h"}
  *   {"action": "save_ranges", "ranges": ["6h", "12h", "24h", "2d", "5d", "1w", "1m"]}
  *   {"action": "save_sensor_label", "sensor": "dht22-01", "label": "Kitchen"}
+ *   {"action": "save_sensor_offset", "sensor": "dht22-01", "temp_offset_c": -0.8, "humidity_offset_pct": 3}
  *   {"action": "add_place", "name": "Brno, South Moravian Region, Czechia", "latitude": 49.19522, "longitude": 16.60796}
  *   {"action": "remove_place", "id": 3}
  *   {"action": "reorder_places", "ids": [5, 3, 7]}
@@ -104,6 +105,13 @@
  * Overview tab to showing `name` as its only display for that sensor, for
  * that profile.
  *
+ * `save_sensor_offset` sets one sensor's calibration offsets in the shared
+ * `sensor_offsets` table (see
+ * ../../../../db/database/sensors/tables/sensor_offsets.md) — unlike a
+ * label, an offset describes the physical sensor, so it's the same for
+ * every profile. Raw readings are never touched; readings.php/daily.php add
+ * the offsets on the way out. Both 0 deletes the row.
+ *
  * All responses are JSON. Errors use db.php's fail() shape ({"error": "..."}),
  * the same convention script.js's fetchJson() already expects from every
  * other api/*.php endpoint.
@@ -116,6 +124,8 @@ const MAX_RANGES = 12; // sane ceiling on how many chips one profile can pile up
 const MAX_LABEL_LEN = 40; // sane ceiling on a sensor label's length (fits a tile's watermark)
 const MAX_PLACES = 8; // sane ceiling on how many forecast locations one profile can save
 const MAX_PLACE_NAME_LEN = 120; // fits geocode.php's longest composed "name, admin1, country" label
+const MAX_TEMP_OFFSET_C = 20.0;      // sanity bounds on calibration offsets — a DHT22
+const MAX_HUMIDITY_OFFSET_PCT = 50.0; // that's off by more than this needs replacing, not correcting
 
 // Keep the server-side session file alive as long as the cookie claims it
 // is. Only fixes GC triggered by this request (gc_probability, which
@@ -453,6 +463,53 @@ switch ($action) {
         $stmt = $pdo->prepare('UPDATE settings SET sensor_labels = :labels WHERE password_id = :pid');
         $stmt->execute(['labels' => encodeLabels($labels), 'pid' => $passwordId]);
         echo json_encode(['ok' => true, 'sensor' => $sensorName, 'label' => $label === '' ? null : $label]);
+        break;
+    }
+
+    case 'save_sensor_offset': {
+        $passwordId = $_SESSION['password_id'] ?? null;
+        if (!$passwordId) {
+            fail(401, 'Not logged in.');
+        }
+        $sensorName = (string) ($input['sensor'] ?? '');
+        if ($sensorName === '') {
+            fail(400, 'sensor is required.');
+        }
+        $tempOffset = $input['temp_offset_c'] ?? 0;
+        $humOffset = $input['humidity_offset_pct'] ?? 0;
+        if (!is_numeric($tempOffset) || !is_numeric($humOffset)) {
+            fail(400, 'Offsets must be numbers.');
+        }
+        $tempOffset = round((float) $tempOffset, 2);
+        $humOffset = round((float) $humOffset, 2);
+        if (abs($tempOffset) > MAX_TEMP_OFFSET_C || abs($humOffset) > MAX_HUMIDITY_OFFSET_PCT) {
+            fail(400, 'Temperature offset must be within ±' . MAX_TEMP_OFFSET_C . ' °C and humidity offset within ±' . MAX_HUMIDITY_OFFSET_PCT . ' %.');
+        }
+        $idStmt = $pdo->prepare('SELECT id FROM sensors WHERE name = :name');
+        $idStmt->execute(['name' => $sensorName]);
+        $sensorId = $idStmt->fetchColumn();
+        if ($sensorId === false) {
+            fail(404, "Unknown sensor: {$sensorName}");
+        }
+        try {
+            if ($tempOffset == 0.0 && $humOffset == 0.0) {
+                $del = $pdo->prepare('DELETE FROM sensor_offsets WHERE sensor_id = :sid');
+                $del->execute(['sid' => $sensorId]);
+            } else {
+                $up = $pdo->prepare(
+                    'INSERT INTO sensor_offsets (sensor_id, temp_offset_c, humidity_offset_pct, updated_at)
+                     VALUES (:sid, :t, :h, :at)
+                     ON CONFLICT (sensor_id) DO UPDATE SET
+                         temp_offset_c = EXCLUDED.temp_offset_c,
+                         humidity_offset_pct = EXCLUDED.humidity_offset_pct,
+                         updated_at = EXCLUDED.updated_at'
+                );
+                $up->execute(['sid' => $sensorId, 't' => $tempOffset, 'h' => $humOffset, 'at' => gmdate('Y-m-d H:i:s')]);
+            }
+        } catch (PDOException $e) {
+            fail(500, 'Could not save offsets: ' . $e->getMessage());
+        }
+        echo json_encode(['ok' => true, 'sensor' => $sensorName, 'temp_offset_c' => $tempOffset, 'humidity_offset_pct' => $humOffset]);
         break;
     }
 

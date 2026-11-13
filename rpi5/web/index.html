@@ -239,6 +239,18 @@
               </p>
               <ul class="label-list" id="label-list"></ul>
 
+              <p class="settings-status">Sensor offsets:</p>
+              <p class="settings-current">
+                Calibration correction per sensor — added to every
+                temperature (°C) and humidity (%) value the dashboard shows:
+                tiles, charts, the readings table and Read Now. The Hive keeps
+                storing the raw DHT22 output, so changing or clearing an
+                offset re-corrects all past readings too. Shared by every
+                profile (it describes the sensor, not your view of it). Set
+                both to 0 to remove.
+              </p>
+              <ul class="label-list" id="offset-list"></ul>
+
               <p class="settings-status">Sensors:</p>
               <p class="settings-current">
                 Each Pi Zero's online/offline status, LAN address, uptime

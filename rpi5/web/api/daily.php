@@ -18,7 +18,17 @@ const MONTHS_BACK = 12;
 $pdo = db();
 
 try {
-    $sensors = $pdo->query('SELECT id, name, description FROM sensors ORDER BY name')->fetchAll();
+    // Temperature calibration offset per sensor (Settings tab, see
+    // readings.php's docstring) — applied to the daily aggregates below so
+    // the long-term chart agrees with the rest of the dashboard.
+    $sensors = $pdo->query(
+        tableExists($pdo, 'sensor_offsets')
+            ? 'SELECT s.id, s.name, s.description, o.temp_offset_c
+               FROM sensors s
+               LEFT JOIN sensor_offsets o ON o.sensor_id = s.id
+               ORDER BY s.name'
+            : 'SELECT id, name, description, NULL AS temp_offset_c FROM sensors ORDER BY name'
+    )->fetchAll();
 } catch (PDOException $e) {
     fail(500, 'Could not read sensor registry: ' . $e->getMessage());
 }
@@ -48,8 +58,10 @@ try {
 }
 
 $series = [];
+$tempOffsets = [];
 foreach ($sensors as $s) {
     $series[(int) $s['id']] = [];
+    $tempOffsets[(int) $s['id']] = (float) ($s['temp_offset_c'] ?? 0);
 }
 foreach ($rows as $row) {
     $sid = (int) $row['sensor_id'];
@@ -58,9 +70,9 @@ foreach ($rows as $row) {
     }
     $series[$sid][] = [
         'day'      => substr((string) $row['day'], 0, 10), // YYYY-MM-DD
-        'temp_avg' => round((float) $row['temp_avg'], 2),
-        'temp_min' => round((float) $row['temp_min'], 2),
-        'temp_max' => round((float) $row['temp_max'], 2),
+        'temp_avg' => round((float) $row['temp_avg'] + $tempOffsets[$sid], 2),
+        'temp_min' => round((float) $row['temp_min'] + $tempOffsets[$sid], 2),
+        'temp_max' => round((float) $row['temp_max'] + $tempOffsets[$sid], 2),
     ];
 }
 

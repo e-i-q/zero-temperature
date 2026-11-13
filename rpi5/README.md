@@ -210,6 +210,16 @@ waiting for the next push.
   are listed but skipped. The readings are stored like any other, and the
   dashboard refreshes once they land. Uses the same shared token as "Sync
   Now" (`setup/setup_sync_trigger.sh`), but doesn't require logging in.
+- **Sensor offsets**: logged in, the Settings tab's Sensors section has a
+  temperature (°C) and humidity (%) calibration offset per sensor. They're
+  stored in the shared `sensor_offsets` table (see
+  `../../db/database/sensors/tables/sensor_offsets.md` — re-run the `db`
+  project's `setup_db.py` once to create it; until then the dashboard just
+  shows raw values) and added on the fly by `api/readings.php` and
+  `api/daily.php`, so tiles, charts, the readings table and the Read Now
+  window all show corrected values while `readings` keeps the raw DHT22
+  output. Changing an offset re-corrects all history. A Pi Zero's own
+  local dashboard (`../rpi-zero/web`) still shows raw values.
 - **Samples**: the recent-readings table's Samples column reads
   success/failed/max instead of a bare count wherever a row has that
   detail — e.g. `4/1/50` means 4 successful reads, 1 failed, out of a

@@ -264,6 +264,7 @@
       // still empty, so this never wipes out someone's in-progress edit on
       // a later 60s poll.
       if (settingsLoggedIn && el('label-list').children.length === 0) renderLabelList();
+      if (settingsLoggedIn && el('offset-list').children.length === 0) renderOffsetList();
     } catch (err) {
       statusLabel = 'Unable to reach the Hive';
       renderStatus();
@@ -1327,6 +1328,7 @@
     renderSettingsCurrent();
     renderRangesEditor();
     renderLabelList();
+    renderOffsetList();
     renderPlacesList();
     renderSyncList();
   }
@@ -1337,6 +1339,7 @@
     el('settings-profile').hidden = true;
     el('ranges-list').innerHTML = '';
     el('label-list').innerHTML = '';
+    el('offset-list').innerHTML = '';
 
     // Labels are private to the profile just logged out of — drop them and
     // redraw anything that was showing one, back to device names only.
@@ -1655,6 +1658,102 @@
     if (!input) return;
     e.preventDefault();
     saveSensorLabel(input.closest('.label-item'));
+  });
+
+  // -- Sensor offsets (calibration, Settings tab, Sensors section) ------------
+  // Unlike labels these are shared by every profile (one sensor_offsets row
+  // per sensor — see settings.php's save_sensor_offset) and come in with
+  // readings.php's payload as temp_offset_c/humidity_offset_pct, where every
+  // value has already been corrected server-side. Same "render once, don't
+  // clobber in-progress edits on every poll" rule as renderLabelList().
+  function renderOffsetList() {
+    const list = el('offset-list');
+    if (!list) return;
+    list.innerHTML = '';
+    sensors.forEach((s) => {
+      const li = document.createElement('li');
+      li.className = 'label-item offset-item';
+      li.dataset.sensor = s.name;
+
+      const name = document.createElement('span');
+      name.className = 'label-item-name';
+      name.textContent = displayName(s);
+      if (labelFor(s)) name.title = s.name;
+
+      const makeInput = (cls, value, unit, step, title) => {
+        const wrap = document.createElement('label');
+        wrap.className = 'offset-field';
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.step = step;
+        input.className = 'settings-input offset-input ' + cls;
+        input.value = String(value || 0);
+        input.title = title;
+        const u = document.createElement('span');
+        u.className = 'offset-unit';
+        u.textContent = unit;
+        wrap.append(input, u);
+        return wrap;
+      };
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'label-item-btn';
+      btn.textContent = 'Save';
+
+      const result = document.createElement('div');
+      result.className = 'label-item-result';
+      result.hidden = true;
+
+      li.append(
+        name,
+        makeInput('offset-temp', s.temp_offset_c, '°C', '0.1', 'Temperature offset, °C (e.g. -0.8)'),
+        makeInput('offset-hum', s.humidity_offset_pct, '%', '0.5', 'Humidity offset, % RH (e.g. 3)'),
+        btn,
+        result,
+      );
+      list.appendChild(li);
+    });
+  }
+
+  async function saveSensorOffset(li) {
+    const btn = li.querySelector('.label-item-btn');
+    const result = li.querySelector('.label-item-result');
+    const temp = Number(li.querySelector('.offset-temp').value || 0);
+    const hum = Number(li.querySelector('.offset-hum').value || 0);
+    btn.disabled = true;
+    result.hidden = true;
+    result.className = 'label-item-result';
+    try {
+      if (!Number.isFinite(temp) || !Number.isFinite(hum)) throw new Error('Offsets must be numbers.');
+      const payload = await postSettings('save_sensor_offset', {
+        sensor: li.dataset.sensor, temp_offset_c: temp, humidity_offset_pct: hum,
+      });
+      result.textContent = (payload.temp_offset_c || payload.humidity_offset_pct)
+        ? `Saved — shown values now corrected by ${payload.temp_offset_c >= 0 ? '+' : ''}${payload.temp_offset_c} °C / ${payload.humidity_offset_pct >= 0 ? '+' : ''}${payload.humidity_offset_pct} %.`
+        : 'Saved — offsets removed, raw readings shown.';
+      result.classList.add('ok');
+      loadReadings(); // readings.php applies offsets server-side — refetch to redraw everything corrected
+      loadDaily();
+    } catch (err) {
+      result.textContent = err.message;
+      result.classList.add('error');
+    } finally {
+      result.hidden = false;
+      btn.disabled = false;
+    }
+  }
+
+  el('offset-list').addEventListener('click', (e) => {
+    const btn = e.target.closest('.label-item-btn');
+    if (!btn || btn.disabled) return;
+    saveSensorOffset(btn.closest('.offset-item'));
+  });
+
+  el('offset-list').addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || !e.target.closest('.offset-input')) return;
+    e.preventDefault();
+    saveSensorOffset(e.target.closest('.offset-item'));
   });
 
   // -- Forecast places (Settings tab, Forecast section) ------------------------
@@ -2145,6 +2244,10 @@
       li.className = 'ondemand-row' + (phase ? ' ' + phase : '');
       state.textContent = text;
     };
+    // The Pi Zero reports raw DHT22 values; correct them by this sensor's
+    // calibration offset like readings.php does for everything else.
+    const tempOffset = s.temp_offset_c || 0;
+    const corrected = (v) => (v === null || v === undefined) ? null : Number(v) + tempOffset;
     const setProgress = (st) => {
       const target = st.samples || 1;
       const pct = st.state === 'done' ? 100 : Math.min(100, Math.round(((st.success || 0) / target) * 100));
@@ -2152,10 +2255,10 @@
 
       temps.textContent = '';
       const cur = document.createElement('span');
-      cur.textContent = fmtTemp(st.current_temp);
+      cur.textContent = fmtTemp(corrected(st.current_temp));
       const avg = document.createElement('span');
       avg.className = 'avg';
-      avg.textContent = ' / ' + fmtTemp(st.avg_temp);
+      avg.textContent = ' / ' + fmtTemp(corrected(st.avg_temp));
       temps.append(cur, avg);
 
       counts.textContent = '';
