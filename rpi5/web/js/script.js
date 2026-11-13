@@ -7,6 +7,7 @@
   const SYNC_TRIGGER_URL = 'api/sync_trigger.php';
   const DEPLOY_TRIGGER_URL = 'api/deploy_trigger.php';
   const WEATHERMAP_URL = 'api/weathermap.php';
+  const ONDEMAND_URL = 'api/ondemand.php';
   const REFRESH_MS = 60000; // poll for new data every minute
   const FORECAST_REFRESH_MS = REFRESH_MS * 5; // forecast.php itself caches Open-Meteo for 30min
   // Geographic centroid of the Czech Republic and a zoom that shows the
@@ -2075,6 +2076,209 @@
     saveRanges([...availableRanges, token])
       .then(() => { input.value = ''; })
       .catch((err) => rangesEditorError(err.message));
+  });
+
+  // -- On-demand reading ("Read Now" on the Overview tab) ----------------------
+  // Asks every online Pi Zero for a fresh reading right now, then polls each
+  // one once a second through api/ondemand.php (a relay to that Pi's own
+  // web/ondemand.php, which serves the progress file dht22_logger.py
+  // --ondemand-dir rewrites after every DHT22 attempt). Each sensor is its own
+  // independent async loop, so a slow or unreachable one only ever stalls its
+  // own row. Closing the window cancels the polling (bumping ondemandSession
+  // makes every loop bail out on its next tick) — the readings themselves
+  // still finish and get stored on the Pi Zeros regardless.
+  const ONDEMAND_POLL_MS = 1000;
+  const ONDEMAND_TIMEOUT_MS = 6 * 60 * 1000; // > the Pi's own sensor-lock wait + a full 50-attempt run
+  const ONDEMAND_MAX_POLL_ERRORS = 5;         // consecutive failed polls before a row gives up
+  let ondemandSession = 0;
+  let ondemandStoredAny = false; // whether to refresh the dashboard on close
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  async function ondemandRequest(method, sensorName) {
+    const url = method === 'GET' ? `${ONDEMAND_URL}?sensor=${encodeURIComponent(sensorName)}` : ONDEMAND_URL;
+    const res = await fetch(url, {
+      method,
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
+      body: method === 'POST' ? JSON.stringify({ sensor: sensorName }) : undefined,
+    });
+    let payload = null;
+    try { payload = await res.json(); } catch { /* fall through */ }
+    if (!res.ok) throw new Error((payload && payload.error) || 'HTTP ' + res.status);
+    return payload;
+  }
+
+  const fmtTemp = (v) => (v === null || v === undefined) ? '—' : Number(v).toFixed(1);
+
+  // One row of the progress window. Returns small setters the polling loop
+  // drives; built via textContent throughout, like every other list here.
+  function buildOndemandRow(s) {
+    const li = document.createElement('li');
+    li.className = 'ondemand-row';
+
+    const nameCell = document.createElement('span');
+    nameCell.className = 'ondemand-name';
+    const nameLabel = document.createElement('span');
+    nameLabel.className = 'ondemand-name-label';
+    nameLabel.textContent = displayName(s);
+    nameLabel.style.color = colorFor(s.id);
+    if (labelFor(s)) nameLabel.title = s.name;
+    const state = document.createElement('span');
+    state.className = 'ondemand-state';
+    nameCell.append(nameLabel, state);
+
+    const bar = document.createElement('div');
+    bar.className = 'ondemand-bar';
+    const fill = document.createElement('div');
+    fill.className = 'ondemand-bar-fill';
+    bar.appendChild(fill);
+
+    const temps = document.createElement('span');
+    temps.className = 'ondemand-temps';
+    const counts = document.createElement('span');
+    counts.className = 'ondemand-counts';
+
+    li.append(nameCell, bar, temps, counts);
+
+    const setPhase = (phase, text) => {
+      li.className = 'ondemand-row' + (phase ? ' ' + phase : '');
+      state.textContent = text;
+    };
+    const setProgress = (st) => {
+      const target = st.samples || 1;
+      const pct = st.state === 'done' ? 100 : Math.min(100, Math.round(((st.success || 0) / target) * 100));
+      fill.style.width = pct + '%';
+
+      temps.textContent = '';
+      const cur = document.createElement('span');
+      cur.textContent = fmtTemp(st.current_temp);
+      const avg = document.createElement('span');
+      avg.className = 'avg';
+      avg.textContent = ' / ' + fmtTemp(st.avg_temp);
+      temps.append(cur, avg);
+
+      counts.textContent = '';
+      const err = document.createElement('span');
+      err.className = (st.errors || 0) > 0 ? 'err' : '';
+      err.textContent = String(st.errors || 0);
+      counts.append(`${st.attempt || 0} / ${st.success || 0} / `, err, ` / ${st.max_attempts || '—'}`);
+    };
+    temps.textContent = '— / —';
+    counts.textContent = '— / — / — / —';
+    return { li, setPhase, setProgress };
+  }
+
+  // Drives one sensor's row from start to done/error/timeout. Resolves to
+  // whether a reading got stored.
+  async function runOndemandFor(s, row, session) {
+    if (!s.online) {
+      row.setPhase('offline', 'offline — skipped');
+      return false;
+    }
+    row.setPhase('queued', 'requesting…');
+    let id;
+    try {
+      id = (await ondemandRequest('POST', s.name)).id;
+    } catch (err) {
+      row.setPhase('error', err.message);
+      return false;
+    }
+
+    const deadline = Date.now() + ONDEMAND_TIMEOUT_MS;
+    let pollErrors = 0;
+    while (session === ondemandSession) {
+      await sleep(ONDEMAND_POLL_MS);
+      if (session !== ondemandSession) return false;
+      if (Date.now() > deadline) {
+        row.setPhase('error', 'timed out');
+        return false;
+      }
+      let payload;
+      try {
+        payload = await ondemandRequest('GET', s.name);
+        pollErrors = 0;
+      } catch (err) {
+        if (++pollErrors >= ONDEMAND_MAX_POLL_ERRORS) {
+          row.setPhase('error', err.message);
+          return false;
+        }
+        continue;
+      }
+      const st = payload.status;
+      if (payload.pending || !st || st.id !== id) {
+        row.setPhase('queued', 'queued…');
+        continue;
+      }
+      row.setProgress(st);
+      if (st.state === 'waiting') {
+        row.setPhase('queued', 'waiting for the sensor…');
+      } else if (st.state === 'reading') {
+        row.setPhase('', `reading — ${st.success}/${st.samples} samples`);
+      } else if (st.state === 'done') {
+        row.setPhase('done', st.message || 'stored');
+        return true;
+      } else {
+        row.setPhase('error', st.message || 'failed');
+        return false;
+      }
+    }
+    return false;
+  }
+
+  async function startOndemand() {
+    const session = ++ondemandSession;
+    const list = el('ondemand-list');
+    list.innerHTML = '';
+    el('ondemand-again').disabled = true;
+
+    if (!sensors.length) {
+      el('ondemand-summary').textContent = 'No sensors registered yet.';
+      el('ondemand-again').disabled = false;
+      return;
+    }
+    const online = sensors.filter((s) => s.online).length;
+    el('ondemand-summary').textContent = `Reading ${online} of ${sensors.length} sensor${sensors.length === 1 ? '' : 's'}…`;
+
+    const results = await Promise.all(sensors.map((s) => {
+      const row = buildOndemandRow(s);
+      list.appendChild(row.li);
+      return runOndemandFor(s, row, session);
+    }));
+    if (session !== ondemandSession) return; // closed (or restarted) meanwhile
+
+    const stored = results.filter(Boolean).length;
+    if (stored) {
+      ondemandStoredAny = true;
+      loadReadings(); // show the fresh readings on the dashboard behind the window right away
+    }
+    el('ondemand-summary').textContent = `Done — ${stored} of ${online} online sensor${online === 1 ? '' : 's'} stored a new reading.`;
+    el('ondemand-again').disabled = false;
+  }
+
+  function openOndemand() {
+    ondemandStoredAny = false;
+    el('ondemand-modal').hidden = false;
+    el('ondemand-close').focus();
+    startOndemand();
+  }
+
+  function closeOndemand() {
+    if (el('ondemand-modal').hidden) return;
+    ondemandSession++; // stop every polling loop
+    el('ondemand-modal').hidden = true;
+    if (ondemandStoredAny) loadReadings();
+    el('ondemand-btn').focus();
+  }
+
+  el('ondemand-btn').addEventListener('click', openOndemand);
+  el('ondemand-close').addEventListener('click', closeOndemand);
+  el('ondemand-again').addEventListener('click', startOndemand);
+  el('ondemand-modal').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closeOndemand(); // backdrop click, not inside the window
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeOndemand();
   });
 
   // -- Range chips --------------------------------------------------------------

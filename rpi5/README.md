@@ -33,6 +33,7 @@ PostgreSQL (Hive, this Pi)  →  api/readings.php, api/daily.php  →  dashboard
 | `web/api/weathermap.php` | JSON API backing the Forecast tab's weather map: OpenWeatherMap tile-layer config plus cached thunderstorm-marker points. See its docstring and "Weather map" below |
 | `web/api/settings.php` | JSON API backing the Settings tab: password-profile login/create/save/logout, session-cookie-backed. See its docstring |
 | `web/api/sync_trigger.php` | JSON API backing the Settings tab's "Sync Now" buttons: relays a manual backlog-sync request to a specific Pi Zero's `web/sync.php`. See its docstring |
+| `web/api/ondemand.php` | JSON API backing the Overview tab's "Read Now" window: starts an on-demand reading on a specific Pi Zero and relays its live progress (`web/ondemand.php` there). See its docstring and "On-demand reading" below |
 | `web/api/deploy_trigger.php` | JSON API backing the Settings tab's "Update Now" buttons: relays a manual pull+redeploy request to a specific Pi Zero's `web/deploy_trigger.php`. See its docstring |
 | `web/api/deploy_webhook.php` | GitHub push webhook receiver: pulls + redeploys the Hive, then relays a deploy trigger to every Pi Zero. See "Push-to-deploy" below |
 | `bin/ping_sensors.php` | Cron-only (not under `web/`): TCP-pings every registered sensor once a minute and stamps `sensors.last_ping_at`, the source of truth for each sensor's ONLINE/OFFLINE badge — see "Sensor liveness pinger" below |
@@ -199,6 +200,16 @@ waiting for the next push.
   `../rpi-zero/README.md`'s "DHT22 fault reporting" section for the Pi
   Zero side (`dht22_logger.py`). It clears itself the moment a later run
   gets at least one successful read — nothing to reset by hand.
+- **On-demand reading**: the Overview tab's "Read Now" button opens a
+  window that asks every online Pi Zero for a fresh reading right away and
+  shows, per sensor, a progress bar plus `latest / average °C` and
+  `attempt / success / errors / max attempts`, updated every second. The
+  browser polls `api/ondemand.php` per sensor, which relays to that Pi
+  Zero's own `web/ondemand.php` — see `../rpi-zero/README.md`'s
+  "On-demand reading (from the Hive)" for the Pi Zero side. Offline sensors
+  are listed but skipped. The readings are stored like any other, and the
+  dashboard refreshes once they land. Uses the same shared token as "Sync
+  Now" (`setup/setup_sync_trigger.sh`), but doesn't require logging in.
 - **Samples**: the recent-readings table's Samples column reads
   success/failed/max instead of a bare count wherever a row has that
   detail — e.g. `4/1/50` means 4 successful reads, 1 failed, out of a

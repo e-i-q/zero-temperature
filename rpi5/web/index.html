@@ -51,7 +51,12 @@
       <!-- Populated by script.js's renderChips() — from the logged-in
            profile's `ranges` list if any, otherwise the fixed default set.
            See Settings tab to add/remove/reorder these. -->
-      <div class="range-chips" id="range-chips"></div>
+      <div class="controls-left">
+        <div class="range-chips" id="range-chips"></div>
+        <!-- Opens #ondemand-modal — see script.js's openOndemand() and
+             api/ondemand.php. -->
+        <button type="button" class="btn btn-secondary" id="ondemand-btn" title="Take a fresh reading on every online sensor right now">Read Now</button>
+      </div>
       <div class="legend" id="legend"></div>
     </div>
 
@@ -261,6 +266,30 @@
 
   </div>
 
+</div>
+
+<!-- On-demand reading progress window — script.js's openOndemand(). One
+     .ondemand-row per sensor: name | progress bar | latest / average temp |
+     attempt / success / errors / max attempts. -->
+<div class="modal-backdrop" id="ondemand-modal" hidden>
+  <div class="modal card" role="dialog" aria-modal="true" aria-labelledby="ondemand-title">
+    <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+    <div class="modal-head">
+      <span class="chart-title" id="ondemand-title">On-demand reading</span>
+      <button type="button" class="modal-close" id="ondemand-close" aria-label="Close">✕</button>
+    </div>
+    <div class="ondemand-row ondemand-row-head" aria-hidden="true">
+      <span>Sensor</span>
+      <span>Progress</span>
+      <span title="latest successful read / average of this run">Now / avg °C</span>
+      <span title="current attempt / successful / failed / max attempts">Read / ok / err / max</span>
+    </div>
+    <ul class="ondemand-list" id="ondemand-list"></ul>
+    <div class="modal-foot">
+      <span class="chart-note" id="ondemand-summary"></span>
+      <button type="button" class="btn btn-secondary" id="ondemand-again" disabled>Read Again</button>
+    </div>
+  </div>
 </div>
 
 <div class="tooltip" id="tooltip" hidden>

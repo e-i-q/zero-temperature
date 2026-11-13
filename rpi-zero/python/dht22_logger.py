@@ -65,9 +65,28 @@ DHT22 read failures:
     directly — see ../../rpi5/bin/ping_sensors.php — precisely so a Zero
     with a loose DHT22 shows ONLINE + FAULTY DHT22 instead of a misleading
     OFFLINE).
+
+On-demand readings (--ondemand-dir):
+    Besides the cron schedule, the Hive dashboard's "Read Now" button can ask
+    for a reading right away. The request lands as <dir>/request.json
+    (written by web/ondemand.php), which a systemd path unit
+    (dht22-ondemand.path, installed by setup/setup_dht22_logger.sh) turns
+    into a run of this script with --ondemand-dir. Such a run claims (deletes)
+    the request and writes live progress — attempt counter, success/error
+    counts, the latest and running-average values — to <dir>/status.json
+    after every single DHT22 attempt, which web/ondemand.php hands back to
+    the Hive for its progress window. Otherwise it's a perfectly ordinary
+    run: the reading is stored locally and mirrored like any other.
+
+    Only one process can talk to the DHT22 at a time, so every run (cron or
+    on-demand) first takes an exclusive lock next to the database file —
+    whichever comes second simply waits for the first to finish.
 """
 
 import argparse
+import fcntl
+import json
+import os
 import sqlite3
 import sys
 import time
@@ -87,14 +106,96 @@ DEFAULT_MAX_ATTEMPTS = 50   # Number of max iterations before reaching samples c
 DEFAULT_DELAY = 2.5         # Seconds between readings (DHT22 needs >= 2s)
 DEFAULT_DB_PATH = "/mnt/sqlite_ram/sensors.db"
 DEFAULT_SENSOR_NAME = "dht22"
+LOCK_FILE_NAME = "dht22_logger.lock"  # lives next to the database file
+LOCK_TIMEOUT_S = 300                   # a full 50-attempt run takes ~2 minutes; never wait forever
 
 
-def read_samples(dht_device, samples, delay, max_attempts):
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+class Progress:
+    """Live progress of an on-demand run, written to <dir>/status.json after
+    every DHT22 attempt — see the "On-demand readings" docstring section."""
+
+    def __init__(self, directory: str, request_id: str, samples: int, max_attempts: int):
+        self.path = Path(directory) / "status.json"
+        self.data = {
+            "id": request_id,
+            "state": "waiting",       # waiting (for the sensor lock) -> reading -> done | error
+            "samples": samples,
+            "max_attempts": max_attempts,
+            "attempt": 0,
+            "success": 0,
+            "errors": 0,
+            "current_temp": None,     # latest successful read
+            "current_hum": None,
+            "avg_temp": None,         # running average of successful reads so far
+            "avg_hum": None,
+            "message": None,
+            "started_at": _now_iso(),
+            "updated_at": None,
+            "finished_at": None,
+        }
+
+    def update(self, **fields) -> None:
+        self.data.update(fields)
+        self.data["updated_at"] = _now_iso()
+        if fields.get("state") in ("done", "error"):
+            self.data["finished_at"] = self.data["updated_at"]
+        # Atomic replace, so web/ondemand.php never reads a half-written file.
+        tmp = self.path.with_name(self.path.name + ".tmp")
+        try:
+            tmp.write_text(json.dumps(self.data))
+            os.replace(tmp, self.path)
+        except OSError as e:
+            print(f"WARNING: could not write progress file {self.path}: {e}", file=sys.stderr)
+
+
+def claim_ondemand_request(directory: str) -> str:
+    """Reads and deletes <dir>/request.json (written by web/ondemand.php),
+    returning its request id — deleting it is also what stops the systemd
+    path unit from immediately re-triggering. Returns "" if there's no
+    request file (e.g. --ondemand-dir passed by hand)."""
+    req = Path(directory) / "request.json"
+    try:
+        data = json.loads(req.read_text())
+    except FileNotFoundError:
+        return ""
+    except (OSError, ValueError):
+        data = {}
+    try:
+        req.unlink()
+    except FileNotFoundError:
+        pass
+    return str(data.get("id") or "") if isinstance(data, dict) else ""
+
+
+def acquire_sensor_lock(db_path: Path):
+    """Exclusive lock so a cron run and an on-demand run never read the
+    DHT22 at the same time. Returns the open lock file (keep it referenced
+    for the life of the process — the lock is released when it closes, i.e.
+    on exit) or None if it couldn't be had within LOCK_TIMEOUT_S."""
+    lock_file = open(db_path.parent / LOCK_FILE_NAME, "a")
+    deadline = time.monotonic() + LOCK_TIMEOUT_S
+    while True:
+        try:
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return lock_file
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                lock_file.close()
+                return None
+            time.sleep(1)
+
+
+def read_samples(dht_device, samples, delay, max_attempts, progress: Progress | None = None):
     """Returns (temps, hums, attempts) — attempts is how many reads were
     actually tried (successes + failures), <= max_attempts: it stops early
     as soon as `samples` good reads are in hand, so a healthy sensor's
     attempts == len(temps) most runs, while a flaky one climbs toward
-    max_attempts as failures eat into the budget."""
+    max_attempts as failures eat into the budget. If `progress` is given
+    (on-demand runs), it's updated after every attempt."""
     temps, hums = [], []
     attempts = 0
     for i in range(1, max_attempts + 1):
@@ -107,6 +208,16 @@ def read_samples(dht_device, samples, delay, max_attempts):
                 hums.append(humidity)
         except RuntimeError as e:
             print(f"  Error reading {i}/{max_attempts}: {e}")
+        if progress is not None:
+            progress.update(
+                attempt=i,
+                success=len(temps),
+                errors=i - len(temps),
+                current_temp=round(temps[-1], 2) if temps else None,
+                current_hum=round(hums[-1], 2) if hums else None,
+                avg_temp=round(average(temps), 2) if temps else None,
+                avg_hum=round(average(hums), 2) if hums else None,
+            )
         if len(temps) >= samples:
             break
         time.sleep(delay)
@@ -206,6 +317,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--delay", type=float, default=DEFAULT_DELAY, help=f"Seconds between readings (default {DEFAULT_DELAY}, min recommended 2.0)")
     parser.add_argument("--db", type=str, default=DEFAULT_DB_PATH, help=f"Path to SQLite database file (default {DEFAULT_DB_PATH})")
     parser.add_argument("--sensor-name", type=str, default=DEFAULT_SENSOR_NAME, help=f"Label stored in the 'sensor' column (default {DEFAULT_SENSOR_NAME})")
+    parser.add_argument("--ondemand-dir", type=str, default=None, help="On-demand run: claim <dir>/request.json and write live progress to <dir>/status.json (see docstring)")
     return parser.parse_args()
 
 
@@ -218,19 +330,39 @@ def main() -> int:
     db_path = Path(args.db)
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
+    progress = None
+    if args.ondemand_dir:
+        request_id = claim_ondemand_request(args.ondemand_dir)
+        progress = Progress(args.ondemand_dir, request_id, args.samples, args.max_attempts)
+        print(f"On-demand run (request {request_id or 'n/a'}) at {progress.data['started_at']}")
+        progress.update(state="waiting")
+
+    lock = acquire_sensor_lock(db_path)  # held until this process exits
+    if lock is None:
+        print(f"ERROR: another DHT22 read still holds the sensor lock after {LOCK_TIMEOUT_S}s — giving up.", file=sys.stderr)
+        if progress is not None:
+            progress.update(state="error", message="Sensor busy — another reading did not finish in time.")
+        return 1
+
     try:
         pin = getattr(board, f"D{args.pin}")
     except AttributeError:
         print(f"ERROR: board has no pin D{args.pin} (--pin {args.pin} is not a valid GPIO number).", file=sys.stderr)
+        if progress is not None:
+            progress.update(state="error", message=f"Invalid GPIO pin {args.pin}.")
         return 1
     dht_device = adafruit_dht.DHT22(pin)
 
     print(f"Reading DHT22 on GPIO{args.pin} — {args.samples} samples, {args.max_attempts} max attempts, {args.delay}s apart…")
-    temps, hums, attempts = read_samples(dht_device, args.samples, args.delay, args.max_attempts)
+    if progress is not None:
+        progress.update(state="reading")
+    temps, hums, attempts = read_samples(dht_device, args.samples, args.delay, args.max_attempts, progress)
     success_count = len(temps)
 
     if not temps:
         print(f"ERROR: All {attempts} sensor read(s) failed. Check wiring and pull-up resistor.", file=sys.stderr)
+        if progress is not None:
+            progress.update(state="error", message=f"All {attempts} read attempts failed — check the DHT22 wiring.")
         # Nothing to average, so no reading row — but still flag the fault
         # on the remote DB, best-effort, so the Hive dashboard can show
         # FAULTY DHT22 instead of just letting readings go stale. Separate
@@ -268,6 +400,16 @@ def main() -> int:
     was_offline = not local_db.get_last_remote_ok(str(db_path))
     remote_ok = store_reading_remote(hostname, timestamp, avg_temp, avg_hum, success_count, attempts, args.max_attempts)
     local_db.set_last_remote_ok(str(db_path), remote_ok)
+
+    if progress is not None:
+        # Reported done as soon as the reading is safely stored — a (rare)
+        # backlog sync below shouldn't keep the Hive's progress window busy.
+        progress.update(
+            state="done",
+            avg_temp=round(avg_temp, 2),
+            avg_hum=round(avg_hum, 2),
+            message=None if remote_ok else "Stored locally only — the Hive database was unreachable.",
+        )
 
     if remote_ok:
         local_db.mark_synced(str(db_path), row_id, timestamp)

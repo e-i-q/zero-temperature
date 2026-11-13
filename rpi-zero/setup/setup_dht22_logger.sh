@@ -6,6 +6,15 @@
 # cron job that runs it on a fixed interval so readings keep landing in the
 # SQLite database without anyone having to start it by hand.
 #
+# Also installs the on-demand reading trigger used by the Hive dashboard's
+# "Read Now" button (see web/ondemand.php and dht22_logger.py's
+# "On-demand readings" docstring section):
+#   /etc/tmpfiles.d/dht22-ondemand.conf   ONDEMAND_DIR (RAM, recreated every
+#                                         boot), RUN_USER:www-data, setgid
+#   dht22-ondemand.path                   watches ONDEMAND_DIR/request.json
+#   dht22-ondemand.service                runs the logger once, as RUN_USER,
+#                                         with --ondemand-dir
+#
 # USAGE:
 #   sudo bash setup/setup_dht22_logger.sh [-v|--verbose]
 #
@@ -28,6 +37,8 @@ MAX_ATTEMPTS="${MAX_ATTEMPTS:-50}"
 DELAY="${DELAY:-2.5}"
 CRON_INTERVAL_MIN="${CRON_INTERVAL_MIN:-10}"
 LOG_FILE="${LOG_FILE:-/var/log/dht22_logger.log}"
+ONDEMAND_DIR="${ONDEMAND_DIR:-/run/dht22-ondemand}"
+WEB_GROUP="${WEB_GROUP:-www-data}"   # group PHP-FPM runs as (writes request.json)
 
 # =============================================================================
 banner() {
@@ -103,6 +114,52 @@ setup_cron() {
   success "Cron job installed: /etc/cron.d/dht22_logger"
 }
 
+# -- On-demand trigger ("Read Now" on the Hive) --------------------------------
+setup_ondemand() {
+  if ! getent group "$WEB_GROUP" &>/dev/null; then
+    warn "Group '${WEB_GROUP}' not found — skipping on-demand trigger (install nginx/PHP first, then re-run)."
+    return
+  fi
+  info "Installing on-demand reading trigger (${ONDEMAND_DIR})…"
+
+  local logger_abs python_bin
+  logger_abs="$(realpath "$LOGGER_SCRIPT")"
+  python_bin="$(command -v python3)"
+
+  # setgid + group-writable: www-data (web/ondemand.php) drops request.json
+  # in here, RUN_USER (the logger) deletes it and writes status.json.
+  echo "d ${ONDEMAND_DIR} 2775 ${RUN_USER} ${WEB_GROUP} -" > /etc/tmpfiles.d/dht22-ondemand.conf
+  systemd-tmpfiles --create /etc/tmpfiles.d/dht22-ondemand.conf
+
+  cat > /etc/systemd/system/dht22-ondemand.service << EOF
+[Unit]
+Description=On-demand DHT22 reading (requested from the Hive dashboard)
+
+[Service]
+Type=oneshot
+User=${RUN_USER}
+ExecStart=${python_bin} ${logger_abs} --samples ${SAMPLES} --max_attempts ${MAX_ATTEMPTS} --delay ${DELAY} --db ${DB_PATH} --ondemand-dir ${ONDEMAND_DIR}
+StandardOutput=append:${LOG_FILE}
+StandardError=append:${LOG_FILE}
+EOF
+
+  cat > /etc/systemd/system/dht22-ondemand.path << EOF
+[Unit]
+Description=Watch for on-demand DHT22 reading requests
+
+[Path]
+PathExists=${ONDEMAND_DIR}/request.json
+Unit=dht22-ondemand.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable --now dht22-ondemand.path
+  success "On-demand trigger installed: dht22-ondemand.path -> dht22-ondemand.service"
+}
+
 # -- Summary -------------------------------------------------------------------
 print_summary() {
   echo
@@ -116,6 +173,9 @@ print_summary() {
   echo
   echo -e "  ${CYAN}Manual test run:${NC}"
   echo -e "    sudo -u ${RUN_USER} python3 ${LOGGER_SCRIPT} --samples ${SAMPLES} --max_attempts ${MAX_ATTEMPTS} --delay ${DELAY} --db ${DB_PATH}"
+  echo
+  echo -e "  ${CYAN}On-demand reading (what the Hive's Read Now button does):${NC}"
+  echo -e "    echo '{\"id\":\"test\"}' > ${ONDEMAND_DIR}/request.json; sleep 40; cat ${ONDEMAND_DIR}/status.json"
   echo
   echo -e "  ${CYAN}Tail the log:${NC}"
   echo -e "    tail -f ${LOG_FILE}"
@@ -132,6 +192,7 @@ main() {
 
   install_python_deps
   setup_cron
+  setup_ondemand
 
   print_summary
 }

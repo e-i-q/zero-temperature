@@ -35,6 +35,7 @@ failing. Nothing needs to be done by hand to catch back up: see
 | `web/readings.php` | JSON API the dashboard polls; queries the SQLite database read-only |
 | `web/sync.php` | Runs `sync_backlog.py` on demand, gated by a shared secret — see "Manual sync trigger (from the Hive)" below |
 | `web/deploy_trigger.php` | Pulls + redeploys this Pi Zero on demand, gated by a shared secret — see "Push-to-deploy (from the Hive)" below |
+| `web/ondemand.php` | Starts an on-demand reading and serves its live progress, gated by the sync secret — see "On-demand reading (from the Hive)" below |
 | `setup/setup_sqlite_ramdisk.sh` | Mounts a tmpfs RAM disk for the SQLite DB, with daily SD backup + restore-on-boot |
 | `setup/setup_nginx_php.sh` | Installs and configures nginx + PHP-FPM (with `pdo_sqlite`) |
 | `setup/setup_dht22_logger.sh` | Installs Python deps and a cron job that runs the logger periodically |
@@ -219,6 +220,32 @@ separate step beyond `deploy_web.sh`. Without this setup, the Settings
 tab's button for this sensor just reports the trigger isn't configured;
 everything else (the automatic offline→online sync) keeps working
 regardless.
+
+## On-demand reading (from the Hive)
+
+The Hive dashboard's Overview tab has a "Read Now" button that takes a
+fresh reading on every online Pi Zero at once and shows each one's live
+progress (attempt counter, successes/errors, latest and average
+temperature). On this Pi it works like this:
+
+```
+Hive api/ondemand.php ─POST→ web/ondemand.php ─writes→ /run/dht22-ondemand/request.json
+                                                         │ (dht22-ondemand.path notices it)
+                                                         ▼
+                      dht22-ondemand.service: dht22_logger.py --ondemand-dir /run/dht22-ondemand
+                                                         │ rewrites status.json after every attempt
+Hive api/ondemand.php ─GET (1×/s)→ web/ondemand.php ─reads┘
+```
+
+The reading itself is an ordinary logger run — stored locally and mirrored
+to the Hive like any cron reading. A run and a cron run never touch the
+DHT22 at the same time: both take a lock file next to the database, and
+whichever comes second waits.
+
+Setup: re-run `sudo bash setup/setup_dht22_logger.sh` (it installs the
+path/service units and the `/run/dht22-ondemand` directory), and make sure
+the sync trigger above is configured — `web/ondemand.php` authenticates
+the Hive with that same shared token.
 
 ## Push-to-deploy (from the Hive)
 
